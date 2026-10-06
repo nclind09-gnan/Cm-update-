@@ -29,7 +29,12 @@ jobs:
           python -c "import ast; ast.parse(open('turbo_tab.py').read()); print('turbo_tab.py OK')"
           python -c "import ast; ast.parse(open('basics_tab.py').read()); print('basics_tab.py OK')"
           python -c "import ast; ast.parse(open('simulation_tab.py').read()); print('simulation_tab.py OK')"
+          python -c "import ast; ast.parse(open('fault_engine.py').read()); print('fault_engine.py OK')"
           python -c "import bearing_data; print('bearing_data imports OK,', len(bearing_data.DATA['data']), 'brands')"
+
+      - name: Run the fault engine physics self test
+        run: |
+          python fault_engine.py
 
   build:
     needs: sanity-check
