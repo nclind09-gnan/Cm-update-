@@ -2,9 +2,11 @@
 Simulation - interactive teaching tools for CM Toolkit.
 
 Sub-tabs:
-  1. Balance Demo   - the whole single-plane job on one screen, with sliders
-                      on every measured value and a live vector diagram
-  (Fault Signature, Orbit and Resonance follow in a later update.)
+  1. Balance Demo     - the whole single-plane job on one screen, with sliders
+                        on every measured value and a live vector diagram
+  2. Fault Signature  - the waveform and spectrum each fault actually produces,
+                        synthesised from the machine geometry you set
+  (Orbit and Resonance follow in a later update.)
 
 The balancing maths is imported directly from rotor_tab so the demo and the
 calculator can never drift apart.
@@ -16,6 +18,7 @@ the top - identical to the Rotor Balance tab.
 import math
 
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, Line, Ellipse, Triangle, Rectangle, RoundedRectangle
 from kivy.metrics import dp
@@ -28,6 +31,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.widget import Widget
 
 from theme import ModernInput, PillButton, RoundedButton
+import fault_engine
 from rotor_tab import (
     to_complex, to_clock_deg, clock_position,
     single_plane_correction,
@@ -632,8 +636,723 @@ class BalanceDemoScreen(Screen):
 # =====================================================================
 # Root
 # =====================================================================
+# =====================================================================
+# Fault Signature - waveform and spectrum synthesised from machine geometry
+# =====================================================================
+C_TRACE = (0.043, 0.431, 0.659)
+C_MARK = (0.710, 0.325, 0.102)
+BAND_V = (0.918, 0.957, 0.925, 1)
+BAND_A = (0.969, 0.933, 0.957, 1)
+BAND_H = (0.929, 0.937, 0.973, 1)
+ZONE_COLOR = {"A": "1A7A4A", "B": "2F6F3E", "C": "9A5B00", "D": "A8291F"}
+
+
+def _eng(v):
+    """Short frequency label."""
+    if v >= 1000:
+        return ("%.0fk" % (v / 1000.0)) if v >= 10000 else ("%.1fk" % (v / 1000.0))
+    if v >= 10:
+        return "%.0f" % v
+    return "%.1f" % v
+
+
+def _sig(v, n=3):
+    if v == 0:
+        return "0"
+    try:
+        d = max(0, n - 1 - int(math.floor(math.log10(abs(v)))))
+    except ValueError:
+        return "0"
+    return "%.*f" % (min(4, d), v)
+
+
+class TraceChart(Widget):
+    """Draws either the time waveform or the spectrum. Kept deliberately
+    simple: one polyline for the trace plus a few grid lines, so a redraw
+    costs almost nothing on a phone."""
+
+    def __init__(self, kind, **kwargs):
+        super().__init__(**kwargs)
+        self.kind = kind            # "wave" or "spec"
+        self.res = None
+        self.xmax = 1.0
+        self.show_bands = True
+        self.show_marks = True
+        self.labels = []
+        self.bind(pos=self._redraw, size=self._redraw)
+
+    def set_data(self, res, xmax, show_bands=True, show_marks=True):
+        self.res = res
+        self.xmax = max(1e-9, xmax)
+        self.show_bands = show_bands
+        self.show_marks = show_marks
+        self._redraw()
+
+    # -- drawing ---------------------------------------------------------
+    def _clear_labels(self):
+        for lb in self.labels:
+            self.remove_widget(lb)
+        self.labels = []
+
+    def _label(self, text, x, y, color, size=10, anchor="center"):
+        lb = Label(text=text, font_size=dp(size), color=color,
+                   size_hint=(None, None), size=(dp(70), dp(14)))
+        lb.texture_update()
+        w = max(dp(24), lb.texture_size[0] + dp(4))
+        lb.size = (w, dp(14))
+        if anchor == "center":
+            lb.pos = (x - w / 2.0, y)
+        elif anchor == "right":
+            lb.pos = (x - w, y)
+        else:
+            lb.pos = (x, y)
+        self.add_widget(lb)
+        self.labels.append(lb)
+        return lb
+
+    def _redraw(self, *a):
+        self.canvas.clear()
+        self._clear_labels()
+        r = self.res
+        if r is None or self.width < dp(40) or self.height < dp(40):
+            return
+
+        L = dp(42)
+        R = dp(8)
+        B = dp(18)
+        T = dp(16) if self.kind == "wave" else dp(22)
+        x0 = self.x + L
+        y0 = self.y + B
+        pw = self.width - L - R
+        ph = self.height - B - T
+        if pw <= 1 or ph <= 1:
+            return
+
+        muted = (*COLOR_TEXT_MUTED[:3], 1)
+
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            Rectangle(pos=(self.x, self.y), size=self.size)
+
+            if self.kind == "spec" and self.show_bands and not r.env:
+                # the band carrying the evidence moves as a bearing fails, so
+                # shade the three measurement regions
+                for lo, hi, col in ((0.0, 1000.0, BAND_V),
+                                    (1000.0, 5000.0, BAND_A),
+                                    (5000.0, 1e12, BAND_H)):
+                    if lo >= self.xmax:
+                        continue
+                    a1 = x0 + pw * lo / self.xmax
+                    a2 = x0 + pw * min(hi, self.xmax) / self.xmax
+                    if a2 - a1 < 2:
+                        continue
+                    Color(*col)
+                    Rectangle(pos=(a1, y0), size=(a2 - a1, ph))
+
+            # grid
+            Color(*COLOR_GRID_FAINT)
+            for i in range(1, 4):
+                yy = y0 + ph * i / 4.0
+                Line(points=[x0, yy, x0 + pw, yy], width=1)
+            for i in range(1, 5):
+                xx = x0 + pw * i / 5.0
+                Line(points=[xx, y0, xx, y0 + ph], width=1)
+
+            Color(*COLOR_GRID)
+            Line(points=[x0, y0 + ph, x0, y0, x0 + pw, y0], width=1.2)
+
+        if self.kind == "wave":
+            self._draw_wave(r, x0, y0, pw, ph, muted)
+        else:
+            self._draw_spec(r, x0, y0, pw, ph, muted)
+
+    def _draw_wave(self, r, x0, y0, pw, ph, muted):
+        x = r.wave
+        n = len(x)
+        yr = 0.0
+        for v in x:
+            if abs(v) > yr:
+                yr = abs(v)
+        yr = yr * 1.08 if yr > 0 else 1.0
+
+        step = max(1, int(n / max(1.0, pw * 1.5)))
+        pts = []
+        i = 0
+        while i < n:
+            pts.append(x0 + pw * i / float(n - 1))
+            pts.append(y0 + ph * 0.5 + (x[i] / yr) * ph * 0.5)
+            i += step
+        with self.canvas:
+            Color(*C_TRACE)
+            Line(points=pts, width=1.2)
+
+        for i in range(5):
+            v = yr - 2 * yr * i / 4.0
+            self._label(_sig(v, 3), x0 - dp(4), y0 + ph * (1 - i / 4.0) - dp(7),
+                        muted, 9, "right")
+        tw = r.t_rec * 1000.0
+        for i in range(3):
+            xx = x0 + pw * i / 2.0
+            self._label("%.0f" % (tw * i / 2.0), xx, y0 - dp(16), muted, 9)
+
+    def _draw_spec(self, r, x0, y0, pw, ph, muted):
+        nb = min(r.nb, int(self.xmax / r.df) + 1)
+        mx = 0.0
+        for k in range(1, nb):
+            if r.mag[k] > mx:
+                mx = r.mag[k]
+        if mx <= 0:
+            mx = 1.0
+        top = mx * 1.1
+
+        pts = []
+        base = y0
+        for k in range(1, nb):
+            xx = x0 + pw * (k * r.df) / self.xmax
+            yy = y0 + ph * (r.mag[k] / top)
+            pts.extend([xx, base, xx, yy, xx, base])
+        with self.canvas:
+            Color(*C_TRACE)
+            if len(pts) >= 4:
+                Line(points=pts, width=1.0)
+
+        for i in range(5):
+            self._label(_sig(top * (1 - i / 4.0), 3), x0 - dp(4),
+                        y0 + ph * (1 - i / 4.0) - dp(7), muted, 9, "right")
+        for i in range(4):
+            hz = self.xmax * i / 3.0
+            xx = x0 + pw * i / 3.0
+            self._label(_eng(hz), xx, y0 - dp(16), muted, 9)
+
+        if not self.show_marks:
+            return
+        marks = r.marks
+        if r.env and r.ctx["def_hz"] > 0:
+            # an envelope spectrum is read by its harmonic family
+            marks = [(n * r.ctx["def_hz"], (("%dx" % n) if n > 1 else "") + r.ctx["def_name"])
+                     for n in range(1, 7)]
+        marks = sorted([m for m in marks if 0 < m[0] <= self.xmax], key=lambda m: m[0])
+        last = -1e9
+        with self.canvas:
+            Color(*C_MARK, 0.45)
+            for hz, lab in marks:
+                xx = x0 + pw * hz / self.xmax
+                Line(points=[xx, y0, xx, y0 + ph], width=1)
+        for hz, lab in marks:
+            xx = x0 + pw * hz / self.xmax
+            if xx - dp(20) <= last:
+                continue
+            self._label(lab, xx, y0 + ph + dp(2), (*C_MARK, 1), 9)
+            last = xx + dp(20)
+
+
+class LazySlider(BoxLayout):
+    """A labelled slider that updates its readout while you drag but only
+    recomputes once you let go. A full synthesis is a few hundred milliseconds
+    on a phone, so recomputing on every pixel of travel would make the control
+    feel broken."""
+
+    def __init__(self, label_text, value, vmin, vmax, step, fmt, on_change, **kwargs):
+        super().__init__(orientation="vertical", size_hint_y=None,
+                         height=dp(56), spacing=dp(0), **kwargs)
+        self._fmt = fmt
+        self._on_change = on_change
+        self.value = value
+        row = BoxLayout(size_hint_y=None, height=dp(20))
+        self.lbl = Label(text=label_text, font_size=dp(11), bold=True,
+                         color=COLOR_TEXT_MUTED, halign="left", valign="middle")
+        self.lbl.bind(size=lambda i, v: setattr(i, "text_size", v))
+        self.val = Label(text=fmt % value, font_size=dp(11), color=COLOR_TEXT,
+                         halign="right", valign="middle", size_hint_x=None, width=dp(96))
+        self.val.bind(size=lambda i, v: setattr(i, "text_size", v))
+        row.add_widget(self.lbl)
+        row.add_widget(self.val)
+        self.add_widget(row)
+        self.slider = Slider(min=vmin, max=vmax, value=value, step=step,
+                             size_hint_y=None, height=dp(32),
+                             cursor_size=(dp(22), dp(22)))
+        self.slider.bind(value=self._live)
+        self.slider.bind(on_touch_up=self._release)
+        self.add_widget(self.slider)
+
+    def _live(self, inst, v):
+        self.value = v
+        self.val.text = self._fmt % v
+
+    def _release(self, inst, touch):
+        if inst.collide_point(*touch.pos):
+            self._on_change()
+        return False
+
+    def set_value(self, v):
+        self.value = v
+        self.slider.value = v
+        self.val.text = self._fmt % v
+
+
+class Segment(BoxLayout):
+    """A compact segmented control."""
+
+    def __init__(self, options, value, on_change, label_text=None, **kwargs):
+        h = dp(56) if label_text else dp(34)
+        super().__init__(orientation="vertical", size_hint_y=None, height=h,
+                         spacing=dp(2), **kwargs)
+        if label_text:
+            lb = Label(text=label_text, font_size=dp(11), bold=True,
+                       color=COLOR_TEXT_MUTED, halign="left", valign="middle",
+                       size_hint_y=None, height=dp(18))
+            lb.bind(size=lambda i, v: setattr(i, "text_size", v))
+            self.add_widget(lb)
+        row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(4))
+        self.buttons = {}
+        self._on_change = on_change
+        self.value = value
+        for key, text in options:
+            btn = PillButton(text, accent=COLOR_ACCENT, inactive=COLOR_PANEL_BG,
+                             text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            btn.bind(on_release=lambda i, k=key: self._pick(k))
+            row.add_widget(btn)
+            self.buttons[key] = btn
+        self.add_widget(row)
+        self._sync()
+
+    def _pick(self, key):
+        self.value = key
+        self._sync()
+        self._on_change(key)
+
+    def set_value(self, key):
+        self.value = key
+        self._sync()
+
+    def _sync(self):
+        for k, b in self.buttons.items():
+            b.set_active(k == self.value)
+
+
+class FaultSignatureScreen(Screen):
+    """Pick a fault, see the waveform and spectrum it actually produces.
+
+    Every frequency comes from the geometry set on this screen, and the three
+    measurement units are derived from one another, so the relationships
+    between them are real rather than drawn in."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(*COLOR_BG)
+            self._bg = Rectangle()
+        self.bind(pos=lambda w, v: setattr(w._bg, "pos", v),
+                  size=lambda w, v: setattr(w._bg, "size", v))
+        self.st = fault_engine.Settings()
+        self.st.lines = 400          # a phone sized record; 800+ still works
+        self.res = None
+        self._pending = None
+
+        root = BoxLayout(orientation="vertical")
+        scroll = ScrollView(do_scroll_x=False)
+        self.col = BoxLayout(orientation="vertical", size_hint_y=None,
+                             padding=[dp(12), dp(10)], spacing=dp(10))
+        self.col.bind(minimum_height=self.col.setter("height"))
+        scroll.add_widget(self.col)
+        root.add_widget(scroll)
+        self.add_widget(root)
+
+        self._build_picker()
+        self._build_charts()
+        self._build_readout()
+        self._build_controls()
+        self._build_guide()
+
+        self.apply_fault(self.st.fault_id, initial=True)
+
+    # -- section helpers --------------------------------------------------
+    def _head(self, text):
+        lb = Label(text="[b]%s[/b]" % text, markup=True, font_size=dp(11),
+                   color=COLOR_TEXT_MUTED, halign="left", valign="middle",
+                   size_hint_y=None, height=dp(18))
+        lb.bind(size=lambda i, v: setattr(i, "text_size", v))
+        self.col.add_widget(lb)
+
+    def _card(self, height=None):
+        box = BoxLayout(orientation="vertical", size_hint_y=None,
+                        padding=dp(8), spacing=dp(6))
+        with box.canvas.before:
+            Color(*COLOR_PANEL_BG)
+            box._bg = RoundedRectangle(radius=[dp(10)])
+        box.bind(pos=lambda w, v: setattr(w._bg, "pos", v),
+                 size=lambda w, v: setattr(w._bg, "size", v))
+        if height:
+            box.height = height
+        else:
+            box.bind(minimum_height=box.setter("height"))
+        self.col.add_widget(box)
+        return box
+
+    # -- fault picker ------------------------------------------------------
+    def _build_picker(self):
+        """One horizontally scrolling strip of chips. A vertical list of 19
+        buttons would push the charts off a phone screen, and the whole point
+        is to watch the trace change as you move between faults."""
+        self._head("FAULT")
+        strip = ScrollView(size_hint=(1, None), height=dp(42),
+                           do_scroll_y=False, do_scroll_x=True,
+                           bar_width=0)
+        row = BoxLayout(orientation="horizontal", size_hint_x=None,
+                        height=dp(38), spacing=dp(6), padding=[0, dp(2)])
+        row.bind(minimum_width=row.setter("width"))
+        self.fault_buttons = {}
+        group = None
+        for f in fault_engine.FAULTS:
+            if group is not None and f["group"] != group:
+                sep = Widget(size_hint_x=None, width=dp(1))
+                with sep.canvas:
+                    Color(*COLOR_BORDER)
+                    sep._r = Rectangle()
+                sep.bind(pos=lambda w, v: setattr(w._r, "pos", v),
+                         size=lambda w, v: setattr(w._r, "size", v))
+                row.add_widget(sep)
+            group = f["group"]
+            btn = PillButton(f["name"], accent=COLOR_ACCENT, inactive=COLOR_PANEL_BG,
+                             text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            btn.label.font_size = dp(12)
+            btn.label.texture_update()
+            btn.size_hint_x = None
+            btn.width = btn.label.texture_size[0] + dp(26)
+            btn.bind(on_release=lambda i, fid=f["id"]: self.apply_fault(fid))
+            row.add_widget(btn)
+            self.fault_buttons[f["id"]] = btn
+        strip.add_widget(row)
+        self.col.add_widget(strip)
+        self._strip = strip
+        self._strip_row = row
+
+    # -- charts ------------------------------------------------------------
+    def _build_charts(self):
+        self._head("TIME WAVEFORM")
+        self.wave_meta = Label(text="", font_size=dp(10), color=COLOR_TEXT_MUTED,
+                               halign="left", valign="middle",
+                               size_hint_y=None, height=dp(14))
+        self.wave_meta.bind(size=lambda i, v: setattr(i, "text_size", v))
+        self.col.add_widget(self.wave_meta)
+        self.wave_chart = TraceChart("wave", size_hint_y=None, height=dp(180))
+        self.col.add_widget(self.wave_chart)
+
+        self.spec_head = Label(text="[b]SPECTRUM[/b]", markup=True, font_size=dp(11),
+                               color=COLOR_TEXT_MUTED, halign="left", valign="middle",
+                               size_hint_y=None, height=dp(18))
+        self.spec_head.bind(size=lambda i, v: setattr(i, "text_size", v))
+        self.col.add_widget(self.spec_head)
+        self.spec_meta = Label(text="", font_size=dp(10), color=COLOR_TEXT_MUTED,
+                               halign="left", valign="middle",
+                               size_hint_y=None, height=dp(14))
+        self.spec_meta.bind(size=lambda i, v: setattr(i, "text_size", v))
+        self.col.add_widget(self.spec_meta)
+        self.spec_chart = TraceChart("spec", size_hint_y=None, height=dp(200))
+        self.col.add_widget(self.spec_chart)
+
+    def _build_readout(self):
+        box = self._card()
+        self.readout = Label(text="", markup=True, font_size=dp(12),
+                             color=COLOR_TEXT, halign="left", valign="top",
+                             size_hint_y=None)
+        self.readout.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)),
+                          texture_size=lambda i, ts: setattr(i, "height", ts[1]))
+        box.add_widget(self.readout)
+        self.warn = Label(text="", markup=True, font_size=dp(11),
+                          color=(0.60, 0.36, 0.02, 1), halign="left", valign="top",
+                          size_hint_y=None, height=0)
+        self.warn.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+        box.add_widget(self.warn)
+
+    # -- controls ----------------------------------------------------------
+    def _build_controls(self):
+        self._head("MACHINE")
+        box = self._card()
+        self.s_rpm = LazySlider("Shaft speed", self.st.rpm, 300, 6000, 15,
+                                "%.0f rpm", self._changed)
+        self.s_sev = LazySlider("Fault severity", self.st.sev, 0, 10, 0.5,
+                                "%.1f / 10", self._changed)
+        self.s_bg = LazySlider("Background level", self.st.bg, 0.2, 4, 0.1,
+                               "x%.1f", self._changed)
+        self.s_fr = LazySlider("Resonance", self.st.fr, 800, 6000, 100,
+                               "%.0f Hz", self._changed)
+        for w in (self.s_rpm, self.s_sev, self.s_bg, self.s_fr):
+            box.add_widget(w)
+
+        self._head("COMPONENTS")
+        box = self._card()
+        self.seg_brg = Segment([(str(i), fault_engine.BEARINGS[i]["id"])
+                                for i in range(len(fault_engine.BEARINGS))],
+                               "0", self._set_bearing, "Bearing")
+        box.add_widget(self.seg_brg)
+        self.seg_def = Segment([("bpfo", "Outer"), ("bpfi", "Inner"), ("bsf", "Ball")],
+                               "bpfo", self._set_defect, "Bearing defect location")
+        box.add_widget(self.seg_def)
+        self.s_teeth = LazySlider("Pinion teeth", self.st.teeth, 12, 90, 1,
+                                  "%.0f teeth", self._changed)
+        self.s_blades = LazySlider("Blades / vanes", self.st.blades, 2, 24, 1,
+                                   "%.0f blades", self._changed)
+        self.s_poles = LazySlider("Motor poles", self.st.poles, 2, 12, 2,
+                                  "%.0f poles", self._changed)
+        for w in (self.s_teeth, self.s_blades, self.s_poles):
+            box.add_widget(w)
+        self.seg_lf = Segment([("50", "50 Hz"), ("60", "60 Hz")], "50",
+                              self._set_lf, "Supply frequency")
+        box.add_widget(self.seg_lf)
+
+        self._head("ANALYSIS")
+        box = self._card()
+        self.seg_unit = Segment([("vel", "Velocity"), ("acc", "Accel"), ("dis", "Displ")],
+                                "vel", self._set_unit, "Measurement")
+        box.add_widget(self.seg_unit)
+        self.seg_mode = Segment([("spec", "Normal"), ("env", "Envelope")], "spec",
+                                self._set_mode, "Spectrum type")
+        box.add_widget(self.seg_mode)
+        self.seg_fmax = Segment([("500", "500"), ("1000", "1k"), ("5000", "5k"),
+                                 ("10000", "10k"), ("40000", "40k")],
+                                "500", self._set_fmax, "F-max (Hz)")
+        box.add_widget(self.seg_fmax)
+        self.seg_lines = Segment([("200", "200"), ("400", "400"),
+                                  ("800", "800"), ("1600", "1600")],
+                                 "400", self._set_lines, "Lines of resolution")
+        box.add_widget(self.seg_lines)
+        self.seg_span = Segment([("0.5", "1/2 rev"), ("1", "1"), ("2", "2"),
+                                 ("8", "8"), ("0", "Full")],
+                                "8", self._set_span, "Waveform span")
+        box.add_widget(self.seg_span)
+        self.seg_aa = Segment([("on", "Filter on"), ("off", "Defeated")], "on",
+                              self._set_aa, "Anti-alias filter")
+        box.add_widget(self.seg_aa)
+
+    # -- guide -------------------------------------------------------------
+    def _build_guide(self):
+        box = self._card()
+        self.g_name = Label(text="", markup=True, font_size=dp(16), color=COLOR_TEXT,
+                            halign="left", valign="top", size_hint_y=None, height=dp(24))
+        self.g_name.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+        box.add_widget(self.g_name)
+        self.g_body = Label(text="", markup=True, font_size=dp(12.5),
+                            color=COLOR_TEXT, halign="left", valign="top",
+                            size_hint_y=None)
+        self.g_body.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)),
+                         texture_size=lambda i, ts: setattr(i, "height", ts[1]))
+        box.add_widget(self.g_body)
+
+        self._head("CALCULATED FREQUENCIES")
+        box = self._card()
+        self.freq_tab = Label(text="", markup=True, font_size=dp(11.5),
+                              color=COLOR_TEXT, halign="left", valign="top",
+                              size_hint_y=None, font_name="RobotoMono-Regular")
+        self.freq_tab.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)),
+                           texture_size=lambda i, ts: setattr(i, "height", ts[1]))
+        box.add_widget(self.freq_tab)
+
+    # -- control callbacks -------------------------------------------------
+    def _set_bearing(self, k):
+        self.st.bearing = int(k)
+        self._changed()
+
+    def _set_defect(self, k):
+        self.st.defect = k
+        self._changed()
+
+    def _set_lf(self, k):
+        self.st.lf = float(k)
+        self._changed()
+
+    def _set_unit(self, k):
+        self.st.unit = k
+        self._changed()
+
+    def _set_mode(self, k):
+        self.st.mode = k
+        self._changed()
+
+    def _set_fmax(self, k):
+        self.st.fmax = float(k)
+        self._changed()
+
+    def _set_lines(self, k):
+        self.st.lines = int(k)
+        self._changed()
+
+    def _set_span(self, k):
+        self.st.wf_rev = float(k)
+        self._changed()
+
+    def _set_aa(self, k):
+        self.st.aa = (k == "on")
+        self._changed()
+
+    def apply_fault(self, fid, initial=False):
+        f = fault_engine.FAULT_BY_ID[fid]
+        self.st.fault_id = fid
+        for k, b in self.fault_buttons.items():
+            b.set_active(k == fid)
+        self._scroll_to_chip(fid)
+        # open each fault where its signature is actually visible
+        self.st.fmax = float(f.get("fmax", 500))
+        self.seg_fmax.set_value(str(int(self.st.fmax)))
+        self.st.lines = int(f.get("lines", 400))
+        self.seg_lines.set_value(str(self.st.lines))
+        self.st.wf_rev = float(f.get("wf_rev", 8))
+        sv = ("%g" % self.st.wf_rev)
+        if sv in self.seg_span.buttons:
+            self.seg_span.set_value(sv)
+        self._changed()
+
+    def _scroll_to_chip(self, fid):
+        """Bring the selected chip into view - with 19 of them in one strip the
+        active one is often off screen."""
+        btn = self.fault_buttons.get(fid)
+        strip = getattr(self, "_strip", None)
+        row = getattr(self, "_strip_row", None)
+        if btn is None or strip is None or row is None:
+            return
+
+        def _do(*_a):
+            span = row.width - strip.width
+            if span <= 0:
+                strip.scroll_x = 0
+                return
+            centre = btn.x - row.x + btn.width * 0.5 - strip.width * 0.5
+            strip.scroll_x = max(0.0, min(1.0, centre / span))
+
+        Clock.schedule_once(_do, 0)
+
+    def _changed(self, *a):
+        """Recompute, but never more than once per frame burst - a synthesis
+        is a few hundred milliseconds on a phone."""
+        self.st.rpm = self.s_rpm.value
+        self.st.sev = self.s_sev.value
+        self.st.bg = self.s_bg.value
+        self.st.fr = self.s_fr.value
+        self.st.teeth = int(self.s_teeth.value)
+        self.st.blades = int(self.s_blades.value)
+        self.st.poles = int(self.s_poles.value)
+        if self._pending is not None:
+            self._pending.cancel()
+        # a synthesis blocks the UI thread, and the heaviest combination takes
+        # the better part of a second on a phone, so say so and give Kivy a
+        # frame to draw that before the work starts
+        self.readout.text = "[color=%s]Computing...[/color]" % MUTED_HEX
+        self._pending = Clock.schedule_once(self._recompute, 0.03)
+
+    def _recompute(self, *a):
+        self._pending = None
+        try:
+            self.res = fault_engine.compute(self.st)
+        except Exception as exc:
+            self.readout.text = "[color=B00020]Could not build this signal: %s[/color]" % exc
+            return
+        self._refresh()
+
+    # -- rendering ---------------------------------------------------------
+    def _refresh(self):
+        r = self.res
+        st = self.st
+        f = fault_engine.FAULT_BY_ID[st.fault_id]
+
+        # waveform window: a spectrum needs a long record, a waveform a
+        # readable one, so show a window of it as an analyst would
+        full = r.wave
+        if st.wf_rev > 0 and r.f1 > 0:
+            want = int(round(st.wf_rev * r.fs / r.f1))
+        else:
+            want = len(full)
+        n = max(32, min(len(full), want))
+        shown = full[:n]
+        tw = n / r.fs
+        wr = fault_engine.Result()
+        wr.wave = shown
+        wr.t_rec = tw
+        wr.env = r.env
+        wr.marks = r.marks
+        wr.ctx = r.ctx
+        wr.df = r.df
+        wr.nb = r.nb
+        wr.mag = r.mag
+        self.wave_chart.set_data(wr, tw)
+
+        rev_shown = tw * r.f1
+        rev_all = r.t_rec * r.f1
+        unit = "g envelope" if r.env else fault_engine.UNIT_WAVE[st.unit]
+        if n < len(full):
+            span = "%.1f of %.1f rev - %.0f ms" % (rev_shown, rev_all, tw * 1000)
+        else:
+            span = "%.1f rev - %.0f ms" % (rev_all, r.t_rec * 1000)
+        self.wave_meta.text = "%s - ms vs %s" % (span, unit)
+
+        # spectrum
+        if r.env:
+            xmax = min(r.nb * r.df, max(12 * r.f1, 4.5 * r.ctx["def_hz"]))
+        else:
+            xmax = st.fmax
+        self.spec_chart.set_data(r, xmax, show_bands=True, show_marks=st.marks)
+        self.spec_head.text = "[b]%s[/b]" % ("ENVELOPE SPECTRUM" if r.env else "SPECTRUM")
+        sunit = "g envelope" if r.env else fault_engine.UNIT_SPEC[st.unit]
+        self.spec_meta.text = ("df %.2f Hz - %d lines - Hanning - Hz vs %s"
+                               % (r.df, min(r.nb, int(xmax / r.df) + 1), sunit))
+
+        # readout
+        zc = ZONE_COLOR.get(r.zone, "5B6472")
+        bits = ["Shaft [b]%.0f rpm[/b] = %.2f Hz" % (st.rpm, r.f1),
+                "Nyquist %.0f Hz" % (r.fs / 2.0),
+                "Crest factor [b]%.2f[/b]" % r.crest]
+        if not r.env:
+            bits.insert(1, "Overall [b]%.2f mm/s RMS[/b] (10-%.0f Hz)  "
+                           "[color=%s][b]Zone %s[/b][/color] %s"
+                        % (r.overall, r.band_hi, zc, r.zone, r.zone_text))
+        self.readout.text = "\n".join(bits)
+
+        if r.aliased and not r.env and not st.aa:
+            self.warn.text = ("[b]Aliasing:[/b] %s above the %.0f Hz Nyquist limit, "
+                              "so it folds back and appears at a false low frequency. "
+                              "Raise F-max or switch the filter on."
+                              % (", ".join(r.aliased), r.fs / 2.0))
+            self.warn.height = self.warn.texture_size[1] + dp(6)
+        elif r.aliased and st.aa:
+            self.warn.text = ("[b]Filtered out:[/b] %s above the %.0f Hz Nyquist limit, "
+                              "so the anti-alias filter has removed it. Raise F-max to see it."
+                              % (", ".join(r.aliased), r.fs / 2.0))
+            self.warn.height = self.warn.texture_size[1] + dp(6)
+        else:
+            self.warn.text = ""
+            self.warn.height = 0
+
+        # guide
+        self.g_name.text = "[b]%s[/b]  [size=11][color=%s]%s[/color][/size]" % (
+            f["name"], MUTED_HEX, f["fam"])
+        looks = "\n".join("  -  " + s for s in f["look"])
+        self.g_body.text = (
+            "%s\n\n"
+            "[color=%s][b]IN THE SPECTRUM[/b][/color]\n%s\n\n"
+            "[color=%s][b]IN THE TIME WAVEFORM[/b][/color]\n%s\n\n"
+            "[color=%s]%s[/color]"
+            % (f["note"], MUTED_HEX, looks, MUTED_HEX, f["wave"], MUTED_HEX, f["phys"])
+        )
+
+        c = r.ctx
+        o = c["brg_o"]
+        rows = [("Shaft speed (1X)", c["f1"], 1.0),
+                ("BPFO  outer race", o["bpfo"] * c["f1"], o["bpfo"]),
+                ("BPFI  inner race", o["bpfi"] * c["f1"], o["bpfi"]),
+                ("BSF   roller", o["bsf"] * c["f1"], o["bsf"]),
+                ("FTF   cage", o["ftf"] * c["f1"], o["ftf"]),
+                ("GMF   gear mesh", c["teeth"] * c["f1"], float(c["teeth"])),
+                ("BPF   blade pass", c["blades"] * c["f1"], float(c["blades"])),
+                ("2 x line frequency", 2 * c["lf"], 2 * c["lf"] / c["f1"]),
+                ("PPF   pole pass", c["ppf"], c["ppf"] / c["f1"])]
+        lines = ["%-18s %9s %8s %8s" % ("", "Hz", "CPM", "Orders")]
+        for name, hz, orders in rows:
+            lines.append("%-18s %9.2f %8.0f %8.3f" % (name, hz, hz * 60.0, orders))
+        self.freq_tab.text = "\n".join(lines)
+
+
 TAB_SUBTITLES = {
     "balance": "Balance demo · live vector solution",
+    "fault": "Fault signature · waveform and spectrum",
 }
 
 
@@ -666,7 +1385,7 @@ class RootWidget(BoxLayout):
         bar = BoxLayout(size_hint_y=None, height=dp(48), padding=[dp(8), dp(6)],
                         spacing=dp(6))
         self.tab_buttons = {}
-        for name, label in (("balance", "Balance Demo"),):
+        for name, label in (("balance", "Balance Demo"), ("fault", "Fault Signature")):
             btn = PillButton(label, accent=COLOR_ACCENT, inactive=COLOR_PANEL_BG,
                              text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
             btn.bind(on_release=lambda i, n=name: self.switch_tab(n))
@@ -676,6 +1395,7 @@ class RootWidget(BoxLayout):
 
         self.sm = ScreenManager(transition=NoTransition())
         self.sm.add_widget(BalanceDemoScreen(name="balance"))
+        self.sm.add_widget(FaultSignatureScreen(name="fault"))
         self.add_widget(self.sm)
 
         self.switch_tab("balance")
@@ -687,7 +1407,11 @@ class RootWidget(BoxLayout):
         self.subtitle.text = TAB_SUBTITLES.get(name, "")
 
     def handle_back(self):
-        """Nothing to unwind yet - main.py falls through to Home."""
+        """Back steps out of a sub-tab to the first one before main.py falls
+        through to Home, the same way CM/DX unwinds its own menu."""
+        if self.sm.current != "balance":
+            self.switch_tab("balance")
+            return True
         return False
 
 
