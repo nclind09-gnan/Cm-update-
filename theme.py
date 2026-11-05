@@ -85,7 +85,7 @@ class PillButton(ButtonBehavior, BoxLayout):
             self._color = Color(*inactive)
             self._rect = RoundedRectangle(radius=[dp(12)])
         self.bind(pos=self._redraw, size=self._redraw)
-        self.label = Label(text=text, bold=True, font_size=sp(13), color=text_color)
+        self.label = Label(text=text, bold=True, font_size=sp(13), color=self.inactive_text_color)
         self.add_widget(self.label)
 
     def _redraw(self, *a):
