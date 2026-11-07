@@ -16,9 +16,16 @@ Sub-tabs:
                         fault pattern, and meet the measurement traps
   6. Waveform Builder - five sine waves, overlaid or merged, with zoom, time
                         cursors, the spectrum of the sum and its statistics
+  7. Bearing Defect Lab - a bearing from its geometry, the catalogue or the
+                        Bearing Freq tab with a defect on the outer race, inner
+                        race, a rolling element or the cage, at five wear
+                        stages: impacts in the waveform, crest factor and
+                        kurtosis, velocity and acceleration spectra, the
+                        envelope (demodulated) spectrum, and the stage trend
 
 Orbit and Resonance share their physics with orbit_engine.py, Phase Survey
-with phase_engine.py and Waveform Builder with wave_engine.py.
+with phase_engine.py, Waveform Builder with wave_engine.py and Bearing Defect
+Lab with bearing_engine.py.
 
 Navigation follows CM/DX: a card menu, tap to open a tool full screen, back
 returns to the menu.
@@ -52,6 +59,7 @@ import fault_engine
 import orbit_engine
 import phase_engine
 import wave_engine
+import bearing_engine
 from rotor_tab import (
     to_complex, to_clock_deg, clock_position,
     single_plane_correction,
@@ -4498,6 +4506,1385 @@ class WaveformScreen(_ToolScreen):
         self.stat_note.text = wave_engine.stats_note(s)
 
 
+# =====================================================================
+# Bearing Defect Lab
+# =====================================================================
+def _rgb(hexs):
+    return (int(hexs[0:2], 16) / 255.0, int(hexs[2:4], 16) / 255.0, int(hexs[4:6], 16) / 255.0)
+
+
+FAM_HEX = bearing_engine.DEFECT_HEX
+FAM_RGB = dict((k, _rgb(v)) for k, v in FAM_HEX.items())
+C_BL_TRACE = (0.043, 0.431, 0.659)
+C_BL_ENV = (0.886, 0.247, 0.541)
+C_BL_TICK = (0.851, 0.467, 0.024)
+C_BL_BAND = (0.992, 0.949, 0.906, 1)
+C_BL_STEEL = (0.62, 0.66, 0.72)
+C_BL_STEEL_D = (0.42, 0.46, 0.53)
+C_BL_ZONE = (0.851, 0.467, 0.024)
+C_BL_DEFECT = (0.80, 0.10, 0.10)
+TREND_METRICS = [("Crest factor", "cf", "D97706"), ("Kurtosis", "kurt", "DC2626"),
+                 ("Acc RMS", "rms", "274EC9"), ("Vel RMS 10-1k", "vrms", "0E8F44"),
+                 ("Envelope at defect", "env", "E23F8A"), ("Ultrasonic", "hfd", "7C3AED")]
+
+
+def _wrap(a):
+    return (a + math.pi) % TAU - math.pi
+
+
+class BLWaveChart(_Plot):
+    """A stretch of the time waveform with the impact times marked, and the
+    demodulated envelope laid over it."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.d = None
+
+    def set_data(self, d):
+        self.d = d
+        self._redraw()
+
+    def _redraw(self, *a):
+        self._reset()
+        d = self.d
+        if d is None or self.width < dp(80) or self.height < dp(60):
+            return
+        L, Rm, T, B = dp(40), dp(8), dp(16), dp(20)
+        x0, pw = self.x + L, self.width - L - Rm
+        yb, ph = self.y + B, self.height - T - B
+        y0 = yb + ph / 2.0
+        y, i0, i1, fs = d["y"], d["i0"], d["i1"], d["fs"]
+        cnt = max(2, i1 - i0)
+        seg = y[i0:i1]
+        env = d.get("env")
+        ext = max(max(seg), -min(seg), 1e-6)
+        if env:
+            ext = max(ext, max(env[i0:i1]))
+        stp = _nice_step(ext, 2)
+        top = stp * math.ceil(ext * 1.05 / stp)
+        sc = ph / 2.0 / top
+        muted = (*COLOR_TEXT_MUTED[:3], 1)
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            Rectangle(pos=self.pos, size=self.size)
+        v = -top
+        while v <= top + 1e-9:
+            with self.canvas:
+                Color(*(COLOR_BORDER if abs(v) < 1e-9 else COLOR_GRID_FAINT))
+                Line(points=[x0, y0 + v * sc, x0 + pw, y0 + v * sc], width=1)
+            self._label(_sig(v, 3) if abs(v) > 1e-9 else "0", x0 - dp(4), y0 + v * sc, muted, 9, "right")
+            v += stp
+        t0, t1 = i0 / fs * 1000.0, i1 / fs * 1000.0
+        ts = _nice_step(t1 - t0, 5)
+        t = math.ceil(t0 / ts - 1e-9) * ts
+        while t <= t1 + 1e-9:
+            xx = x0 + pw * (t - t0) / (t1 - t0)
+            with self.canvas:
+                Color(*COLOR_GRID_FAINT)
+                Line(points=[xx, yb, xx, yb + ph], width=1)
+            anc = "right" if xx > x0 + pw - dp(18) else ("left" if xx < x0 + dp(12) else "center")
+            self._label(_sig(t, 4), xx, self.y + dp(7), muted, 9, anc)
+            t += ts
+        cols = int(pw / 1.5)
+        pts = []
+        if cnt <= cols:
+            for i in range(i0, i1):
+                pts.extend([x0 + pw * (i - i0) / float(cnt - 1), y0 + y[i] * sc])
+        else:
+            for c in range(cols):
+                a = i0 + cnt * c // cols
+                b = max(a + 1, i0 + cnt * (c + 1) // cols)
+                chunk = y[a:b]
+                xx = x0 + pw * c / float(cols)
+                pts.extend([xx, y0 + max(chunk) * sc, xx, y0 + min(chunk) * sc])
+        with self.canvas:
+            Color(*COLOR_BORDER)
+            Line(rectangle=(x0, yb, pw, ph), width=1)
+            Color(*d.get("color", C_BL_TRACE), 1)
+            if len(pts) >= 4:
+                Line(points=pts, width=dp(0.9))
+            if env:
+                ep = []
+                step = max(1, cnt // max(2, cols))
+                for i in range(i0, i1, step):
+                    ep.extend([x0 + pw * (i - i0) / float(cnt - 1), y0 + env[i] * sc])
+                Color(*C_BL_ENV, 1)
+                if len(ep) >= 4:
+                    Line(points=ep, width=dp(1.4))
+            for (tk, s) in d.get("ticks", []):
+                xx = x0 + pw * (tk * 1000.0 - t0) / (t1 - t0)
+                if x0 <= xx <= x0 + pw:
+                    h = dp(4) + dp(7) * max(0.0, min(1.0, s))
+                    Color(*C_BL_TICK, 0.35 + 0.65 * max(0.0, min(1.0, s)))
+                    Triangle(points=[xx - dp(3.5), yb + ph + dp(1) + h, xx + dp(3.5), yb + ph + dp(1) + h,
+                                     xx, yb + ph + dp(1)])
+        if d.get("title"):
+            self._label(d["title"], x0 + dp(4), yb + ph - dp(8), muted, 9, "left")
+
+
+class BLImpactChart(_Plot):
+    """One impact, close up: the burst of ringing at the resonance and the
+    exponential decay that bounds it."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.d = None
+
+    def set_data(self, d):
+        self.d = d
+        self._redraw()
+
+    def _redraw(self, *a):
+        self._reset()
+        d = self.d
+        if d is None or self.width < dp(80) or self.height < dp(60):
+            return
+        L, Rm, T, B = dp(40), dp(8), dp(10), dp(20)
+        x0, pw = self.x + L, self.width - L - Rm
+        yb, ph = self.y + B, self.height - T - B
+        y0 = yb + ph / 2.0
+        y, fs, ti = d["y"], d["fs"], d["t"]
+        pre, post = 0.0008, d["len"]
+        i0 = max(0, int((ti - pre) * fs))
+        i1 = min(len(y), int((ti + post) * fs))
+        if i1 - i0 < 4:
+            return
+        seg = y[i0:i1]
+        ext = max(max(seg), -min(seg), d["a"], 1e-6)
+        stp = _nice_step(ext, 2)
+        top = stp * math.ceil(ext * 1.05 / stp)
+        sc = ph / 2.0 / top
+        muted = (*COLOR_TEXT_MUTED[:3], 1)
+        X = lambda t: x0 + pw * (t + pre) / (pre + post)
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            Rectangle(pos=self.pos, size=self.size)
+        v = -top
+        while v <= top + 1e-9:
+            with self.canvas:
+                Color(*(COLOR_BORDER if abs(v) < 1e-9 else COLOR_GRID_FAINT))
+                Line(points=[x0, y0 + v * sc, x0 + pw, y0 + v * sc], width=1)
+            self._label(_sig(v, 3) if abs(v) > 1e-9 else "0", x0 - dp(4), y0 + v * sc, muted, 9, "right")
+            v += stp
+        ts = _nice_step((pre + post) * 1000.0, 5)
+        t = math.ceil(-pre * 1000.0 / ts) * ts
+        while t <= post * 1000.0 + 1e-9:
+            xx = X(t / 1000.0)
+            with self.canvas:
+                Color(*COLOR_GRID_FAINT)
+                Line(points=[xx, yb, xx, yb + ph], width=1)
+            self._label(_sig(t, 3), xx, self.y + dp(7), muted, 9)
+            t += ts
+        pts = []
+        for i in range(i0, i1):
+            pts.extend([X(i / fs - ti), y0 + y[i] * sc])
+        dec = d["dec"]
+        up, dn = [], []
+        k = 0
+        while k <= 60:
+            tt = post * k / 60.0
+            e = d["a"] * math.exp(-dec * tt)
+            up.extend([X(tt), y0 + e * sc])
+            dn.extend([X(tt), y0 - e * sc])
+            k += 1
+        with self.canvas:
+            Color(*COLOR_BORDER)
+            Line(rectangle=(x0, yb, pw, ph), width=1)
+            Color(*C_BL_TRACE, 1)
+            Line(points=pts, width=dp(1))
+            Color(*C_BL_ENV, 1)
+            Line(points=up, width=dp(1), dash_length=dp(4), dash_offset=dp(3))
+            Line(points=dn, width=dp(1), dash_length=dp(4), dash_offset=dp(3))
+            Color(*C_BL_TICK, 1)
+            xx = X(0.0)
+            Line(points=[xx, yb, xx, yb + ph], width=dp(1))
+        self._label("impact", X(0.0) + dp(3), yb + ph - dp(8), (*C_BL_TICK, 1), 9, "left", True)
+        self._label("ms from impact", x0 + pw - dp(2), yb + dp(8), muted, 9, "right")
+
+
+class BLSpecChart(_Plot):
+    """A spectrum with bearing frequency markers. Drawn one bar per pixel
+    column (the tallest line in it) so 6400 lines stay honest on a phone."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.d = None
+
+    def set_data(self, d):
+        self.d = d
+        self._redraw()
+
+    def _redraw(self, *a):
+        self._reset()
+        d = self.d
+        if d is None or self.width < dp(80) or self.height < dp(60):
+            return
+        L, Rm, T, B = dp(40), dp(8), dp(30), dp(20)
+        x0, pw = self.x + L, self.width - L - Rm
+        yb, ph = self.y + B, self.height - T - B
+        mag, df, f0, f1 = d["mag"], d["df"], d["f0"], d["f1"]
+        k0 = max(1, int(f0 / df))
+        k1 = min(len(mag) - 1, int(math.ceil(f1 / df)))
+        mx = max(mag[k0:k1 + 1]) if k1 > k0 else 0.0
+        mx = max(mx, d.get("min_top", 1e-4))
+        stp = _nice_step(mx * 1.15, 4)
+        top = stp * math.ceil(mx * 1.15 / stp)
+        X = lambda f: x0 + pw * (f - f0) / (f1 - f0)
+        Y = lambda v: yb + ph * min(1.0, v / top)
+        muted = (*COLOR_TEXT_MUTED[:3], 1)
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            Rectangle(pos=self.pos, size=self.size)
+            band = d.get("band")
+            if band:
+                bl, bh = max(f0, band[0]), min(f1, band[1])
+                if bh > bl:
+                    Color(*C_BL_BAND)
+                    Rectangle(pos=(X(bl), yb), size=(X(bh) - X(bl), ph))
+        v = 0.0
+        while v <= top + 1e-9:
+            with self.canvas:
+                Color(*(COLOR_GRID_FAINT if v else COLOR_BORDER))
+                Line(points=[x0, Y(v), x0 + pw, Y(v)], width=1)
+            self._label(_sig(v, 3) if v else "0", x0 - dp(4), Y(v), muted, 9, "right")
+            v += stp
+        fsx = _nice_step(f1 - f0, 5)
+        f = math.ceil(f0 / fsx) * fsx
+        while f <= f1 + 1e-9:
+            with self.canvas:
+                Color(*COLOR_GRID_FAINT)
+                Line(points=[X(f), yb, X(f), yb + ph], width=1)
+            anc = "right" if X(f) > x0 + pw - dp(16) else "center"
+            self._label(_eng(f), X(f), self.y + dp(7), muted, 9, anc)
+            f += fsx
+        cols = {}
+        for k in range(k0, k1 + 1):
+            c = int(X(k * df))
+            if mag[k] > cols.get(c, -1.0):
+                cols[c] = mag[k]
+        pts = []
+        for c in sorted(cols):
+            pts.extend([c, yb, c, Y(cols[c]), c, yb])
+        with self.canvas:
+            Color(*COLOR_BORDER)
+            Line(rectangle=(x0, yb, pw, ph), width=1)
+            Color(*d.get("color", C_BL_TRACE), 1)
+            if len(pts) >= 4:
+                Line(points=pts, width=1)
+        placed = []
+        for (fm, rgb, lab, strong) in d.get("marks", []):
+            if not (f0 < fm < f1):
+                continue
+            got, _ = bearing_engine.peak_near(mag, df, fm)
+            px, py = X(fm), Y(got)
+            sz = dp(5) if strong else dp(3.5)
+            with self.canvas:
+                Color(*rgb, 1 if strong else 0.75)
+                Triangle(points=[px - sz, py + dp(4) + 2 * sz, px + sz, py + dp(4) + 2 * sz, px, py + dp(4)])
+                if strong:
+                    Color(*rgb, 0.35)
+                    Line(points=[px, yb, px, yb + ph], width=1, dash_length=dp(3), dash_offset=dp(3))
+            if lab:
+                ly = min(self.top - dp(7), py + dp(12) + 2 * sz)
+                for qx, qy in placed:
+                    if abs(qx - px) < dp(46) and abs(qy - ly) < dp(11):
+                        ly = min(self.top - dp(7), qy + dp(11))
+                placed.append((px, ly))
+                self._label(lab, px, ly, (*rgb, 1), 9, bold=strong)
+        if d.get("title"):
+            self._label(d["title"], x0 + pw - dp(2), yb + ph - dp(8), muted, 9, "right")
+
+
+class BLTrendChart(_Plot):
+    """Each measurement across the five stages, scaled to its own maximum,
+    so the shapes can be compared: which rises first, which falls back."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.rows = None
+        self.cur = 0
+
+    def set_data(self, rows, cur):
+        self.rows, self.cur = rows, cur
+        self._redraw()
+
+    def _redraw(self, *a):
+        self._reset()
+        rows = self.rows
+        if not rows or self.width < dp(80) or self.height < dp(60):
+            return
+        L, Rm, T, B = dp(34), dp(14), dp(10), dp(22)
+        x0, pw = self.x + L, self.width - L - Rm
+        yb, ph = self.y + B, self.height - T - B
+        X = lambda s: x0 + pw * s / 4.0
+        Y = lambda v: yb + ph * v
+        muted = (*COLOR_TEXT_MUTED[:3], 1)
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            Rectangle(pos=self.pos, size=self.size)
+            Color(*COLOR_ACCENT_SOFT)
+            ha = max(x0, X(self.cur) - pw / 10.0)
+            hb = min(x0 + pw, X(self.cur) + pw / 10.0)
+            Rectangle(pos=(ha, yb), size=(hb - ha, ph))
+        for v in (0.0, 0.5, 1.0):
+            with self.canvas:
+                Color(*(COLOR_BORDER if v == 0 else COLOR_GRID_FAINT))
+                Line(points=[x0, Y(v), x0 + pw, Y(v)], width=1)
+            self._label("%d%%" % (v * 100), x0 - dp(4), Y(v), muted, 9, "right")
+        for s in range(5):
+            self._label(bearing_engine.STAGE_NAMES[s] if s == 0 else str(s), X(s), self.y + dp(8), muted, 9)
+        for name, key, hexs in TREND_METRICS:
+            vals = [r[key] for r in rows]
+            mx = max(vals) or 1.0
+            pts = []
+            for s, val in enumerate(vals):
+                pts.extend([X(s), Y(val / mx)])
+            rgb = _rgb(hexs)
+            with self.canvas:
+                Color(*rgb, 1)
+                Line(points=pts, width=dp(1.3))
+                for s, val in enumerate(vals):
+                    r = dp(3.2)
+                    Ellipse(pos=(X(s) - r, Y(val / mx) - r), size=(2 * r, 2 * r))
+
+
+class BearingDiagram(Widget):
+    """The bearing seen end on, in slow motion: the load zone, the cage and
+    its rolling elements turning at FTF, the defect, and a flash each time
+    an element strikes it - brighter the more load it carries there."""
+
+    VIS_REV_S = 0.25      # shaft turns per second, on screen
+
+    def __init__(self, scr, **kwargs):
+        super().__init__(**kwargs)
+        self.scr = scr
+        self.tau = 0.0
+        self._ev = None
+        self.flash = 0.0
+        self.bind(pos=self._redraw, size=self._redraw)
+
+    def start(self):
+        if self._ev is None:
+            self._ev = Clock.schedule_interval(self._tick, 1.0 / 30.0)
+
+    def stop(self):
+        if self._ev is not None:
+            self._ev.cancel()
+            self._ev = None
+
+    def _tick(self, dt):
+        self.tau += min(dt, 0.1)
+        self._redraw()
+
+    def _redraw(self, *a):
+        self.canvas.clear()
+        if self.width < dp(60) or self.height < dp(60):
+            return
+        st = self.scr.st
+        b = st.bearing
+        o = b.orders
+        nel = b.elements()
+        if b.bd and b.pd:
+            ratio = b.bd / b.pd
+        else:
+            ratio = bearing_engine.geometry_from_orders(o)["ratio"]
+        cx, cy = self.center_x, self.center_y
+        R = min(self.width, self.height) / 2.0 - dp(14)
+        rp = R * 0.64
+        rb = min(rp * max(0.10, min(0.35, ratio)), rp * math.sin(math.pi / nel) * 0.9)
+        ro_in = rp + rb               # outer race surface
+        ri_out = rp - rb              # inner race surface
+        bore = max(dp(6), ri_out - (R - ro_in) - dp(4))
+        stage = st.stage
+        th_s = TAU * self.VIS_REV_S * self.tau
+        th_c = th_s * o["FTF"]
+        down = -math.pi / 2.0
+
+        def P(ang, r):
+            return cx + r * math.cos(ang), cy + r * math.sin(ang)
+
+        def lf(ang):
+            return bearing_engine.load_factor(_wrap(ang - down), st.zone, b.roller)
+
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            Rectangle(pos=self.pos, size=self.size)
+            # load zone, drawn as a band outside the outer ring (Kivy measures
+            # these angles clockwise from 12 o'clock, so 180 is the bottom)
+            Color(*C_BL_ZONE, 0.28)
+            half = min(179.9, st.zone / 2.0)
+            Line(circle=(cx, cy, R + dp(6), 180 - half, 180 + half), width=dp(4))
+            # outer ring
+            Color(*C_BL_STEEL)
+            Ellipse(pos=(cx - R, cy - R), size=(2 * R, 2 * R))
+            Color(1, 1, 1, 1)
+            Ellipse(pos=(cx - ro_in, cy - ro_in), size=(2 * ro_in, 2 * ro_in))
+            # inner ring and shaft
+            Color(*C_BL_STEEL)
+            Ellipse(pos=(cx - ri_out, cy - ri_out), size=(2 * ri_out, 2 * ri_out))
+            Color(*C_BL_STEEL_D)
+            Ellipse(pos=(cx - bore, cy - bore), size=(2 * bore, 2 * bore))
+            # a keyway mark so the shaft rotation is visible
+            Color(1, 1, 1, 0.9)
+            kx, ky = P(th_s + math.pi / 2.0, bore * 0.7)
+            Ellipse(pos=(kx - dp(3), ky - dp(3)), size=(dp(6), dp(6)))
+            # cage
+            if st.loc == "cage" and stage > 0:
+                Color(*C_BL_DEFECT, 0.9)
+                Line(circle=(cx, cy, rp, math.degrees(-th_c) + 20, math.degrees(-th_c) + 340), width=dp(1.4),
+                     dash_length=dp(5), dash_offset=dp(3))
+            else:
+                Color(0.486, 0.227, 0.929, 0.8)
+                Line(circle=(cx, cy, rp), width=dp(1.2))
+
+        hit_pts = []
+        # defects and the strikes on them
+        if stage > 0 and st.loc in ("outer", "inner"):
+            if st.loc == "outer":
+                dang = down + math.radians(st.def_ang)
+                dr = ro_in
+            else:
+                dang = th_s + 1.1 + down
+                dr = ri_out
+            sz = dp(2.5) + dp(1.6) * stage
+            with self.canvas:
+                Color(*C_BL_DEFECT, 1)
+                px, py = P(dang, dr + (dp(1) if st.loc == "outer" else -dp(1)))
+                Ellipse(pos=(px - sz / 2.0, py - sz / 2.0), size=(sz, sz))
+            tol = math.asin(min(1.0, rb / rp)) * 0.45
+            for i in range(nel):
+                ang = down + th_c + TAU * i / nel
+                if abs(_wrap(ang - dang)) < tol:
+                    hit_pts.append((P(dang, dr), max(0.04, lf(dang))))
+        with self.canvas:
+            for i in range(nel):
+                ang = down + th_c + TAU * i / nel
+                bx, by = P(ang, rp)
+                load = lf(ang)
+                shade = 0.55 - 0.25 * load
+                Color(shade, shade + 0.03, shade + 0.08, 1)
+                Ellipse(pos=(bx - rb, by - rb), size=(2 * rb, 2 * rb))
+                Color(1, 1, 1, 0.35)
+                Ellipse(pos=(bx - rb * 0.55, by + rb * 0.05), size=(rb * 0.6, rb * 0.6))
+                if st.loc == "ball" and stage > 0 and i == 0:
+                    spin = th_s * o["BSF"]
+                    mx, my = bx + rb * 0.75 * math.cos(spin), by + rb * 0.75 * math.sin(spin)
+                    sz = dp(2) + dp(1.3) * stage
+                    Color(*C_BL_DEFECT, 1)
+                    Ellipse(pos=(mx - sz / 2.0, my - sz / 2.0), size=(sz, sz))
+                    rel = _wrap(spin - ang)
+                    if abs(rel) < 0.35:
+                        hit_pts.append((P(ang, ro_in), max(0.04, lf(ang))))
+                    elif abs(_wrap(rel - math.pi)) < 0.35:
+                        hit_pts.append((P(ang, ri_out), 0.55 * max(0.04, lf(ang))))
+            for (hx, hy), s in hit_pts:
+                r = dp(6) + dp(12) * s
+                Color(1.0, 0.75, 0.1, 0.25 + 0.6 * s)
+                Ellipse(pos=(hx - r, hy - r), size=(2 * r, 2 * r))
+                Color(*C_BL_DEFECT, 0.4 + 0.6 * s)
+                Ellipse(pos=(hx - r * 0.4, hy - r * 0.4), size=(r * 0.8, r * 0.8))
+            # the load arrow
+            Color(*C_BL_ZONE, 1)
+            ax, ay = cx, cy - R - dp(2)
+            Triangle(points=[ax - dp(5), ay + dp(1), ax + dp(5), ay + dp(1), ax, ay - dp(8)])
+
+
+class BearingLabScreen(_ToolScreen):
+    """A rolling element bearing with a defect at one of five wear stages:
+    defect frequencies from the geometry, impacts in the waveform, the
+    velocity and acceleration spectra, the envelope spectrum, and how every
+    measurement changes from new to failed."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.st = bearing_engine.Settings()
+        self.res = None
+        self.sm = None
+        self.diag = None
+        self.trend = None
+        self.src = "preset"
+        self.wunit = "acc"
+        self.wspan = "imp"
+        self.show_env = True
+        self.sunit = "vel"
+        self.szoom = "low"
+        self.anim = True
+        self._trend_ev = None
+        self._catalog = None
+        self._cat_ev = None
+
+        self._build_bearing()
+        self._build_diagram()
+        self._build_freqs()
+        self._build_defect()
+        self._build_wave()
+        self._build_spectrum()
+        self._build_envelope()
+        self._build_trend()
+        self._build_reference()
+
+        self._bearing_changed()
+
+    # -- small helpers ----------------------------------------------------
+    def _vbox(self):
+        b = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(6))
+        b.bind(minimum_height=b.setter("height"))
+        return b
+
+    def _small(self, text):
+        return "[color=%s][size=%d]%s[/size][/color]" % (MUTED_HEX, int(dp(10.5)), text)
+
+    def _row_input(self, parent, label, value, on_done, width=dp(110), flt="float"):
+        row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
+        lb = Label(text=label, font_size=dp(11), color=COLOR_TEXT_MUTED, halign="left", valign="middle")
+        lb.bind(size=lambda o, v: setattr(o, "text_size", v))
+        row.add_widget(lb)
+        fin = ModernInput(text=value, input_filter=flt, height=dp(40), panel_color=(1, 1, 1, 1),
+                          text_color=COLOR_TEXT, accent=COLOR_ACCENT, font_size=dp(13))
+        fin.size_hint_x = None
+        fin.width = width
+        if on_done is not None:
+            fin.ti.bind(on_text_validate=lambda t: on_done(t.text),
+                        focus=lambda t, f: (not f) and on_done(t.text))
+        row.add_widget(fin)
+        parent.add_widget(row)
+        return fin
+
+    # -- the bearing ------------------------------------------------------
+    def _build_bearing(self):
+        self._head("THE BEARING")
+        box = self._card()
+        self.seg_src = Segment([("preset", "Typical"), ("catalog", "Catalogue"), ("geom", "Geometry"),
+                                ("tab", "Bearing tab")], "preset", self._set_src)
+        box.add_widget(self.seg_src)
+        self.src_box = self._vbox()
+        box.add_widget(self.src_box)
+
+        # typical bearings
+        self.pan_preset = self._vbox()
+        self.ch_preset = Choice("Bearing (typical dimensions)",
+                                [(p["id"], p["name"]) for p in bearing_engine.PRESETS], "6205", self._pick_preset)
+        self.pan_preset.add_widget(self.ch_preset)
+
+        # catalogue search, the same 14,535 bearings as the Bearing Freq tab
+        self.pan_cat = self._vbox()
+        row = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(6))
+        self.ch_brand = Choice("Brand", [("SKF", "SKF")], "SKF", lambda k: self._cat_search())
+        row.add_widget(self.ch_brand)
+        mb = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(58), spacing=dp(2))
+        lb = Label(text="Model", font_size=dp(11), bold=True, color=COLOR_TEXT_MUTED, halign="left",
+                   valign="middle", size_hint_y=None, height=dp(18))
+        lb.bind(size=lambda o, v: setattr(o, "text_size", v))
+        mb.add_widget(lb)
+        self.cat_q = ModernInput(text="6205", height=dp(38), panel_color=(1, 1, 1, 1), text_color=COLOR_TEXT,
+                                 accent=COLOR_ACCENT, font_size=dp(13))
+        self.cat_q.ti.bind(text=lambda *a: self._cat_search_later())
+        mb.add_widget(self.cat_q)
+        row.add_widget(mb)
+        self.pan_cat.add_widget(row)
+        self.cat_grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(4))
+        self.cat_grid.bind(minimum_height=self.cat_grid.setter("height"))
+        self.pan_cat.add_widget(self.cat_grid)
+        self.cat_note = self._text(self.pan_cat, 11, color=COLOR_TEXT_MUTED)
+
+        # geometry
+        self.pan_geom = self._vbox()
+        self.g_n = self._row_input(self.pan_geom, "Rolling elements, N", "9", None, flt="int")
+        self.g_bd = self._row_input(self.pan_geom, "Element diameter Bd, mm", "7.94", None)
+        self.g_pd = self._row_input(self.pan_geom, "Pitch diameter Pd, mm", "39.04", None)
+        self.g_th = self._row_input(self.pan_geom, "Contact angle, degrees", "0", None)
+        self.seg_type = Segment([("ball", "Ball"), ("roller", "Roller")], "ball", lambda k: None)
+        self.pan_geom.add_widget(self.seg_type)
+        btn = RoundedButton(text="Use this geometry", accent=COLOR_ACCENT, height=dp(42))
+        btn.bind(on_release=lambda *a: self._use_geometry())
+        self.pan_geom.add_widget(btn)
+        self.geom_note = self._text(self.pan_geom, 11, color=COLOR_TEXT_MUTED)
+
+        # from the Bearing Freq tab
+        self.pan_tab = self._vbox()
+        self._text(self.pan_tab, 11.5, color=COLOR_TEXT_MUTED).text = (
+            "Pick a bearing in the Bearing Freq tab (Catalog or Custom), then come back here and load it. "
+            "Its shaft speed comes with it. The factors are checked against each other (BPFO = N x FTF), so "
+            "BPFO, BPFI and BSF land in the right place whichever way round they were stored.")
+        btn = RoundedButton(text="Load from Bearing Freq tab", accent=COLOR_ACCENT, height=dp(42))
+        btn.bind(on_release=lambda *a: self._use_tab())
+        self.pan_tab.add_widget(btn)
+        self.tab_note = self._text(self.pan_tab, 11.5)
+
+        self.src_box.add_widget(self.pan_preset)
+
+        self.s_rpm = LazySlider("Shaft speed", self.st.rpm, 60, 6000, 5, "%.0f rpm", self._rpm_done)
+        box.add_widget(self.s_rpm)
+        self.rpm_in = self._row_input(box, "Exact speed, rpm", "%.0f" % self.st.rpm, self._rpm_typed)
+        self.brg_info = self._text(box, 12)
+
+    def _set_src(self, k):
+        self.src = k
+        self.src_box.clear_widgets()
+        pan = {"preset": self.pan_preset, "catalog": self.pan_cat, "geom": self.pan_geom, "tab": self.pan_tab}[k]
+        self.src_box.add_widget(pan)
+        if k == "catalog":
+            self._load_catalog()
+            self._cat_search()
+
+    def _pick_preset(self, k):
+        self.st.bearing = bearing_engine.preset_bearing(k)
+        self._bearing_changed()
+
+    def _load_catalog(self):
+        if self._catalog is not None:
+            return
+        try:
+            from bearing_data import DATA
+            self._catalog = DATA.get("data", {})
+        except Exception as exc:          # keep the lab alive without it
+            self._catalog = {}
+            self.cat_note.text = "Catalogue could not be loaded: %s" % exc
+        brands = sorted(self._catalog.keys()) or ["SKF"]
+        self.ch_brand.set_options([("ALL", "All brands")] + [(b, b) for b in brands],
+                                  "SKF" if "SKF" in brands else brands[0])
+
+    def _cat_search_later(self):
+        if self._cat_ev is not None:
+            self._cat_ev.cancel()
+        self._cat_ev = Clock.schedule_once(lambda *a: self._cat_search(), 0.3)
+
+    def _cat_search(self):
+        self._cat_ev = None
+        if self._catalog is None:
+            return
+        self.cat_grid.clear_widgets()
+        q = self.cat_q.text.strip().lower()
+        if not q:
+            self.cat_note.text = "Type part of a model number, e.g. 6205, 22220 or NU314."
+            return
+        brand = self.ch_brand.value
+        keys = sorted(self._catalog.keys()) if brand == "ALL" else [brand]
+        hits = []
+        for k in keys:
+            for row in self._catalog.get(k, []):
+                if q in str(row[0]).lower():
+                    hits.append((k, row))
+                    if len(hits) >= 12:
+                        break
+            if len(hits) >= 12:
+                break
+        # exact matches first
+        hits.sort(key=lambda h: (str(h[1][0]).lower() != q, len(str(h[1][0]))))
+        for k, row in hits:
+            b = PillButton("%s  %s" % (row[0], k), accent=COLOR_ACCENT, inactive=COLOR_ACCENT_SOFT,
+                           text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            b.size_hint_y = None
+            b.height = dp(34)
+            b.label.font_size = dp(11.5)
+            b.bind(on_release=lambda i, kk=k, rr=row: self._pick_catalog(kk, rr))
+            self.cat_grid.add_widget(b)
+        self.cat_note.text = ("No match." if not hits else
+                              "Tap a bearing. The catalogue gives defect factors (multiples of shaft speed); "
+                              "the geometry is worked back from them.")
+
+    def _pick_catalog(self, brand, row):
+        try:
+            bpfo, bpfi, bsf, ftf = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+        except (TypeError, ValueError, IndexError):
+            self.cat_note.text = "That entry has no complete defect factors."
+            return
+        if min(bpfo, bpfi, bsf, ftf) <= 0:
+            self.cat_note.text = "That entry has no complete defect factors."
+            return
+        self.st.bearing = bearing_engine.Bearing.from_orders("%s %s" % (brand, row[0]), bpfo, bpfi, bsf, ftf)
+        self._bearing_changed()
+
+    def _use_geometry(self):
+        try:
+            n = int(float(self.g_n.text))
+            bd, pd, th = float(self.g_bd.text), float(self.g_pd.text), float(self.g_th.text or 0)
+        except (TypeError, ValueError):
+            self.geom_note.text = "[color=B00020]Fill in all four numbers.[/color]"
+            return
+        if n < 3 or bd <= 0 or pd <= bd or not (0 <= th < 90):
+            self.geom_note.text = ("[color=B00020]Needs N of 3 or more, Pd larger than Bd, and a contact angle "
+                                   "from 0 to 89 degrees.[/color]")
+            return
+        self.st.bearing = bearing_engine.Bearing.from_geometry(
+            "Custom: %d x %.2f mm on %.2f mm, %.0f deg" % (n, bd, pd, th), n, bd, pd, th,
+            self.seg_type.value == "roller")
+        self.geom_note.text = "Using this geometry."
+        self._bearing_changed()
+
+    def _use_tab(self):
+        try:
+            import bearing_tab
+            sel, rpm = bearing_tab.SHARED.get("sel"), bearing_tab.SHARED.get("rpm")
+        except Exception:
+            sel, rpm = None, None
+        if not sel or not all(sel.get(k) for k in ("BPFO", "BPFI", "BSF", "FTF")):
+            self.tab_note.text = ("[color=B00020]Nothing chosen there yet. Open Bearing Freq, pick a bearing, "
+                                  "then try again.[/color]")
+            return
+        name = ("%s %s" % (sel.get("brand", ""), sel.get("model", ""))).strip() or "Bearing tab selection"
+        self.st.bearing = bearing_engine.Bearing.from_orders(name, sel["BPFO"], sel["BPFI"], sel["BSF"],
+                                                             sel["FTF"], source="tab")
+        msg = "Loaded [b]%s[/b]" % name
+        if rpm:
+            self.st.rpm = max(60.0, min(6000.0, float(rpm)))
+            self.s_rpm.set_value(self.st.rpm)
+            self.rpm_in.text = "%.0f" % self.st.rpm
+            msg += " at %.0f rpm" % self.st.rpm
+        self.tab_note.text = msg + "."
+        self._bearing_changed()
+
+    def _rpm_done(self):
+        self.st.rpm = float(self.s_rpm.value)
+        self.rpm_in.text = "%.0f" % self.st.rpm
+        self._bearing_changed()
+
+    def _rpm_typed(self, text):
+        try:
+            v = float(text)
+        except (TypeError, ValueError):
+            v = self.st.rpm
+        v = max(60.0, min(6000.0, v))
+        self.rpm_in.text = "%.0f" % v
+        if abs(v - self.st.rpm) < 1e-6:
+            return
+        self.st.rpm = v
+        self.s_rpm.set_value(v)
+        self._bearing_changed()
+
+    def _bearing_changed(self):
+        b = self.st.bearing
+        g = bearing_engine.geometry_from_orders(b.orders)
+        if b.bd and b.pd:
+            geo = ("N = %d elements, Bd %.2f mm on Pd %.2f mm (Bd/Pd = %.3f), contact angle %.0f deg, %s."
+                   % (b.elements(), b.bd, b.pd, b.bd / b.pd, b.th, "rollers" if b.roller else "balls"))
+        else:
+            geo = ("From the catalogue factors: N = BPFO + BPFI = %.2f elements, (Bd/Pd) cos a = 1 - 2 FTF = %.3f, "
+                   "Bd/Pd = %.3f, so a contact angle of about %.0f deg." % (g["n"], g["dc"], g["ratio"], g["th"]))
+            if b.notes:
+                geo += "\n" + self._small("Read with care: %s." % "; ".join(b.notes))
+        f1 = self.st.rpm / 60.0
+        self.brg_info.text = ("[b]%s[/b]\n%s\n[color=%s]Running speed 1X = %.0f rpm = %s Hz.[/color]"
+                              % (b.name, geo, MUTED_HEX, self.st.rpm, bearing_engine.fmt_hz(f1)))
+        self._freq_text()
+        self.diagram._redraw()
+        self._changed()
+
+    # -- slow motion diagram ---------------------------------------------
+    def _build_diagram(self):
+        self._head("THE BEARING IN SLOW MOTION")
+        row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
+        self.seg_anim = Segment([("on", "Animate"), ("off", "Pause")], "on", self._set_anim)
+        row.add_widget(self.seg_anim)
+        self.col.add_widget(row)
+        self.diagram = BearingDiagram(self, size_hint_y=None, height=dp(270))
+        self.col.add_widget(self.diagram)
+        self.diag_note = self._meta()
+        self.diag_note.text = ("Shaft turning once every %.0f s. Amber band: the load zone (load pushing down). "
+                               "Darker elements carry more load. Red: the defect. A flash marks each strike - "
+                               "brighter where the load is higher, exactly as the impacts in the waveform below."
+                               % (1.0 / BearingDiagram.VIS_REV_S))
+
+    def _set_anim(self, k):
+        self.anim = (k == "on")
+        if self.anim and self.manager is not None and self.manager.current == self.name:
+            self.diagram.start()
+        else:
+            self.diagram.stop()
+
+    def on_enter(self, *a):
+        if self.anim:
+            self.diagram.start()
+
+    def on_leave(self, *a):
+        self.diagram.stop()
+
+    # -- frequencies -------------------------------------------------------
+    def _build_freqs(self):
+        self._head("DEFECT FREQUENCIES")
+        box = self._card()
+        self.freq_tbl = self._text(box, 11, mono=True)
+        self.freq_formula = self._text(box, 11.5)
+        self.harm_tbl = self._text(box, 11, mono=True)
+
+    def _freq_text(self):
+        st = self.st
+        calc, act = bearing_engine.frequencies(st)
+        o = st.bearing.orders
+        rows = [("FTF", "cage"), ("BSF", "ball spin"), ("2xBSF", "ball defect"), ("BPFO", "outer race"),
+                ("BPFI", "inner race")]
+        lines = ["[b]%-6s %7s %9s %9s %7s[/b]" % ("", "Order", "Calc Hz", "Slip Hz", "CPM")]
+        for k, desc in rows:
+            order = o["BSF"] * 2 if k == "2xBSF" else o[k]
+            lines.append("[color=%s][b]%-6s[/b][/color] %7.3f %9s %9s %7.0f"
+                         % (FAM_HEX[k], k, order, bearing_engine.fmt_hz(calc[k]), bearing_engine.fmt_hz(act[k]),
+                            act[k] * 60))
+        self.freq_tbl.text = "\n".join(lines)
+        b = st.bearing
+        if b.bd and b.pd:
+            r = b.bd / b.pd * math.cos(math.radians(b.th))
+            geo = "with (Bd/Pd) cos a = %.2f/%.2f x cos %.0f = [b]%.4f[/b] and N = %d:" % (b.bd, b.pd, b.th, r,
+                                                                                         b.elements())
+        else:
+            r = 1 - 2 * o["FTF"]
+            geo = "with (Bd/Pd) cos a = [b]%.4f[/b] and N = %.2f (worked back from the catalogue):" % (
+                r, o["BPFO"] + o["BPFI"])
+        s = st.slip
+        self.freq_formula.text = (
+            "%s\n"
+            "  FTF  = 1/2 (1 - %.4f) x 1X = [b]%.4f[/b] X\n"
+            "  BPFO = N/2 (1 - %.4f) x 1X = [b]%.3f[/b] X\n"
+            "  BPFI = N/2 (1 + %.4f) x 1X = [b]%.3f[/b] X\n"
+            "  BSF  = Pd/(2 Bd) (1 - %.4f^2) x 1X = [b]%.3f[/b] X\n"
+            "%s"
+            % (geo, r, o["FTF"], r, o["BPFO"], r, o["BPFI"], r, o["BSF"],
+               self._small("Checks: BPFO + BPFI = N (%.3f + %.3f = %.2f); BPFO = N x FTF; BPFI = N x (1 - FTF). "
+                           "Not whole-number orders, which is how a bearing line is told apart from a running "
+                           "speed harmonic. 'Slip Hz' is what an analyser really measures: the elements skid "
+                           "%.1f %%, so the cage, BPFO and BSF run slightly slow and BPFI slightly fast."
+                           % (o["BPFO"], o["BPFI"], o["BPFO"] + o["BPFI"], s))))
+        hl = ["[b]%-6s %8s %8s %8s %8s %8s[/b]" % ("Hz", "1x", "2x", "3x", "4x", "5x")]
+        for k in ("FTF", "BSF", "BPFO", "BPFI"):
+            hl.append("[color=%s][b]%-6s[/b][/color] " % (FAM_HEX[k], k) +
+                      " ".join("%8s" % bearing_engine.fmt_hz(h * act[k]) for h in range(1, 6)))
+        self.harm_tbl.text = "\n".join(hl)
+
+    # -- the defect --------------------------------------------------------
+    def _build_defect(self):
+        self._head("THE DEFECT")
+        box = self._card()
+        self.seg_loc = Segment([("outer", "Outer"), ("inner", "Inner"), ("ball", "Element"), ("cage", "Cage")],
+                               self.st.loc, self._set_loc, label_text="Where is the damage?")
+        box.add_widget(self.seg_loc)
+        self.seg_stage = Segment([("0", "Healthy"), ("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")],
+                                 str(self.st.stage), self._set_stage, label_text="Wear stage")
+        box.add_widget(self.seg_stage)
+        self.s_load = LazySlider("Radial load (impact strength)", self.st.load, 25, 200, 5, "%.0f %%",
+                                 self._slider_done)
+        box.add_widget(self.s_load)
+        self.s_zone = LazySlider("Load zone width", self.st.zone, 90, 360, 5, "%.0f deg", self._slider_done,
+                                 on_live=lambda v: self._live_diagram("zone", v))
+        box.add_widget(self.s_zone)
+        self.s_ang = LazySlider("Outer race defect, from load zone centre", self.st.def_ang, 0, 180, 5, "%.0f deg",
+                                self._slider_done, on_live=lambda v: self._live_diagram("def_ang", v))
+        box.add_widget(self.s_ang)
+        self.s_slip = LazySlider("Rolling element slip", self.st.slip, 0, 3, 0.1, "%.1f %%", self._slider_done)
+        box.add_widget(self.s_slip)
+        self.s_fr = LazySlider("Housing resonance", self.st.fr, 1000, 4500, 50, "%.0f Hz", self._slider_done)
+        box.add_widget(self.s_fr)
+        self.s_unb = LazySlider("Residual unbalance at 1X", self.st.unb, 0, 6, 0.1, "%.1f mm/s pk",
+                                self._slider_done)
+        box.add_widget(self.s_unb)
+        self.ch_mount = Choice("Accelerometer mounting", [(m[0], "%s (~%.1f kHz)" % (m[1], m[2] / 1000.0))
+                                                          for m in bearing_engine.MOUNTS], self.st.mount,
+                               self._set_mount)
+        box.add_widget(self.ch_mount)
+        self.defect_note = self._text(box, 11, color=COLOR_TEXT_MUTED)
+
+        self._head("WHAT THIS STAGE LOOKS LIKE")
+        box = self._card()
+        self.stage_txt = self._text(box, 12)
+
+    def _live_diagram(self, attr, v):
+        setattr(self.st, attr, float(v))
+        self.diagram._redraw()
+
+    def _set_loc(self, k):
+        self.st.loc = k
+        self._changed()
+
+    def _set_stage(self, k):
+        self.st.stage = int(k)
+        self._changed()
+
+    def _set_mount(self, k):
+        self.st.mount = k
+        self._changed()
+
+    def _slider_done(self):
+        self.st.load = float(self.s_load.value)
+        self.st.zone = float(self.s_zone.value)
+        self.st.def_ang = float(self.s_ang.value)
+        self.st.slip = float(self.s_slip.value)
+        self.st.fr = float(self.s_fr.value)
+        self.st.unb = float(self.s_unb.value)
+        self._freq_text()
+        self._changed()
+
+    def _stage_text(self):
+        st = self.st
+        d = bearing_engine.STAGE_DETAIL[st.stage]
+        what = d["what"] % ("%.0f" % st.fr) if "%s" in d["what"] else d["what"]
+        rows = [("Ultrasonic / HFD", d["ultra"]), ("Envelope spectrum", d["env"]), ("Velocity spectrum", d["spec"]),
+                ("Time waveform", d["wave"]), ("Action", d["action"]), ("Remaining life", d["life"])]
+        self.stage_txt.text = ("[b][color=%s]%s[/color][/b]\n%s\n\n" % (ACCENT_HEX, bearing_engine.STAGE_TITLES[st.stage],
+                                                                        what) +
+                               "\n".join("[b]%s:[/b] %s" % r for r in rows))
+        loc = bearing_engine.LOC_NAME[st.loc]
+        notes = ["Defect: [b]%s[/b], repeating at %s." % (
+            loc, {"outer": "BPFO", "inner": "BPFI", "ball": "2 x BSF (it hits both races each spin)",
+                  "cage": "FTF"}[st.loc])]
+        if st.loc != "outer":
+            notes.append("The defect position slider only applies to an outer race defect, which stays put; "
+                         "the others move round on their own.")
+        _, _, fm, q = bearing_engine.MOUNT_BY_ID[st.mount]
+        if fm < 1.6 * st.fr:
+            notes.append("[color=B00020]This mount's resonance (%.1f kHz) is too close to the %.1f kHz housing "
+                         "resonance - it cannot pass the impacts cleanly.[/color]" % (fm / 1000.0, st.fr / 1000.0))
+        self.defect_note.text = "\n".join(notes)
+
+    # -- waveform ----------------------------------------------------------
+    def _build_wave(self):
+        self._head("TIME WAVEFORM - THE IMPACTS")
+        box = self._card()
+        row = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(6))
+        self.ch_wunit = Choice("Units", [("acc", "Acceleration g"), ("vel", "Velocity mm/s")], "acc",
+                               self._set_wunit)
+        self.ch_wspan = Choice("Show", [("imp", "6 impacts"), ("rev", "3 revolutions"), ("cage", "1 cage turn"),
+                                        ("all", "Whole record")], "imp", self._set_wspan)
+        row.add_widget(self.ch_wunit)
+        row.add_widget(self.ch_wspan)
+        box.add_widget(row)
+        self.seg_env = Segment([("on", "Envelope on"), ("off", "Envelope off")], "on", self._set_envshow)
+        box.add_widget(self.seg_env)
+        self.wave_meta = self._meta()
+        self.wave = BLWaveChart(size_hint_y=None, height=dp(230))
+        self.col.add_widget(self.wave)
+        self.wave_note = self._meta()
+
+        self._head("ONE IMPACT, CLOSE UP")
+        self.imp_meta = self._meta()
+        self.impact = BLImpactChart(size_hint_y=None, height=dp(170))
+        self.col.add_widget(self.impact)
+        box = self._card()
+        self.imp_txt = self._text(box, 11.5)
+
+        self._head("WAVEFORM STATISTICS")
+        box = self._card()
+        self.stats_txt = self._text(box, 12)
+
+    def _set_wunit(self, k):
+        self.wunit = k
+        self._show_wave()
+
+    def _set_wspan(self, k):
+        self.wspan = k
+        self._show_wave()
+
+    def _set_envshow(self, k):
+        self.show_env = (k == "on")
+        self._show_wave()
+
+    def _show_wave(self):
+        r = self.res
+        if r is None:
+            return
+        st = self.st
+        fs = bearing_engine.FS
+        n = r["n"]
+        act = r["act"]
+        key = bearing_engine.defect_key(st.loc)
+        fd = act[key]
+        imps = r["imps"]
+        if self.wspan == "imp":
+            T = 6.0 / fd
+        elif self.wspan == "rev":
+            T = 3.0 / act["1X"]
+        elif self.wspan == "cage":
+            T = 1.0 / act["FTF"]
+        else:
+            T = n / fs
+        T = min(T, n / fs)
+        # start just before the strongest impact of the first stretch, so the
+        # chosen window opens on something worth seeing
+        t_start = 0.0
+        if imps and self.wspan != "all":
+            first = [i for i in imps if 0.0 <= i[0] < n / fs - T]
+            if first:
+                lead = first[:max(1, int(len(first) * 0.25))]
+                best = max(lead, key=lambda i: i[1])
+                t_start = max(0.0, best[0] - (0.5 / fd if self.wspan == "imp" else 0.1 * T))
+        i0 = int(t_start * fs)
+        i1 = min(n, i0 + max(8, int(T * fs)))
+        y = r["acc"] if self.wunit == "acc" else r["vel"]
+        amax = max([i[1] for i in imps]) if imps else 1.0
+        ticks = [(i[0], i[1] / amax) for i in imps if i0 / fs <= i[0] <= i1 / fs]
+        env = r["env"] if (self.show_env and self.wunit == "acc") else None
+        self.wave.set_data({"y": y, "i0": i0, "i1": i1, "fs": fs, "env": env, "ticks": ticks,
+                            "color": C_BL_TRACE,
+                            "title": "g" if self.wunit == "acc" else "mm/s"})
+        unit = "g" if self.wunit == "acc" else "mm/s"
+        self.wave_meta.text = ("Time in ms from the start of the record, amplitude in %s. Amber marks: each impact, "
+                               "taller where it is stronger.%s" % (
+                                   unit, " Rose line: the envelope the demodulator extracts." if env else ""))
+        if self.wunit == "vel":
+            note = ("In velocity the impacts almost vanish: velocity is acceleration divided by 2 pi f, and the "
+                    "impacts ring at %.1f kHz. That is why velocity alone misses an early bearing defect."
+                    % (st.fr / 1000.0))
+        elif not imps:
+            note = "No impacts at this stage - only rolling noise and running speed."
+        else:
+            dt = 1.0 / fd
+            note = ("Impacts every %.2f ms = 1 / %s Hz (%s). " % (dt * 1000, bearing_engine.fmt_hz(fd), key))
+            if st.loc == "inner":
+                note += ("Their height swells and fades once per revolution (%.1f ms) as the defect turns through "
+                         "the load zone." % (1000.0 / act["1X"]))
+            elif st.loc == "ball":
+                note += ("Strikes alternate strong and weak (outer then inner race), and the whole train swells "
+                         "once per cage turn (%.0f ms)." % (1000.0 / act["FTF"]))
+            elif st.loc == "outer":
+                note += ("Evenly spaced and about the same height: the defect sits still, so every element meets it "
+                         "under the same load.")
+            else:
+                note += "Weak and irregular knocks - a rattling cage, not a spall."
+            if st.stage == 4:
+                note += " At stage 4 the spacing has broken down; the impacts are buried in random noise."
+        self.wave_note.text = note
+
+        # the close up
+        if imps:
+            mid = [i for i in imps if 0.002 < i[0] < n / fs - 0.02]
+            best = max(mid or imps, key=lambda i: i[1])
+            p = r["p"]
+            dec = p["zeta"] * TAU * st.fr
+            dur = min(0.02, max(0.004, 5.0 / dec))
+            self.impact.set_data({"y": r["acc"], "fs": fs, "t": best[0], "a": best[1], "dec": dec, "len": dur})
+            tc = 1000.0 / dec
+            self.imp_meta.text = "The strongest impact in the record, %.1f ms long window, acceleration in g." % (
+                (dur + 0.0008) * 1000)
+            self.imp_txt.text = (
+                "Ringing at the housing resonance, %.0f Hz (one cycle every %.3f ms). Damping %.1f %% of critical, "
+                "so it dies away with a time constant of %.2f ms (dashed rose line: %.2f g x e^(-t / %.2f ms)). "
+                "%s\n%s" % (st.fr, 1000.0 / st.fr, p["zeta"] * 100, tc, best[1], tc,
+                            "A young, sharp spall rings longest and cleanest; a large worn one is a duller, faster "
+                            "dying knock." if st.stage <= 2 else
+                            "The impact is broader and dies faster than at stage 2: the spall edges have worn.",
+                            self._small("The impact itself lasts microseconds. The ring is what the sensor sees, "
+                                        "and its repetition rate - not its pitch - is the defect frequency.")))
+        else:
+            self.impact.set_data(None)
+            self.imp_meta.text = ""
+            self.imp_txt.text = "No impacts at this stage."
+
+    def _stats_text(self):
+        sm = self.sm
+        a, v = sm["acc"], sm["vel"]
+        cf = a["cf"]
+        k = a["kurt"]
+        cf_note = ("near-Gaussian noise; no impacting" if cf < 4.5 else
+                   ("raised: some impacting" if cf < 6 else "high: sharp impacts well above the RMS"))
+        k_note = ("about 3: random noise, healthy" if k < 4 else
+                  ("above 3: impulsive content" if k < 8 else "far above 3: strongly impulsive"))
+        rows = [
+            ("Acceleration peak", "%.3f g" % max(a["pk"], -a["tr"]), "largest excursion either way"),
+            ("Acceleration peak-to-peak", "%.3f g" % a["pp"], "full swing"),
+            ("Acceleration RMS", "%.3f g" % a["rms"], "0 - 5 kHz, the energy in the whole record"),
+            ("Crest factor", "%.2f" % cf, "peak / RMS: %s" % cf_note),
+            ("Kurtosis", "%.1f" % k, "spikiness, 3 for random noise: %s" % k_note),
+            ("Skewness", "%.2f" % a["skew"], "lopsidedness; near 0 for a ringing impact"),
+            ("Velocity RMS, 10 - 1000 Hz", "%.2f mm/s" % sm["vrms"], "the ISO overall level - barely moves until "
+                                                                      "stage 3"),
+            ("Acceleration RMS, 1 - 5 kHz", "%.3f g" % sm["hf"], "high frequency band where the resonance lives"),
+            ("Envelope at the defect frequency", "%.3f gE" % sm["env_def"], "the demodulated line"),
+            ("Ultrasonic 20 - 60 kHz (model)", "%.2f g" % sm["hfd"], "stress waves above this record's 5 kHz; "
+                                                                    "a typical trend, not computed from the trace"),
+        ]
+        self.stats_txt.text = "\n".join("[b]%s[/b]   %s\n%s" % (k1, v1, self._small(m)) for k1, v1, m in rows)
+
+    # -- spectrum ----------------------------------------------------------
+    def _build_spectrum(self):
+        self._head("SPECTRUM")
+        box = self._card()
+        row = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(6))
+        self.ch_sunit = Choice("Units", [("vel", "Velocity mm/s"), ("acc", "Acceleration g")], "vel",
+                               self._set_sunit)
+        self.ch_szoom = Choice("Range", [("low", "Bearing range"), ("res", "Around resonance"),
+                                         ("full", "0 - 5 kHz")], "low", self._set_szoom)
+        row.add_widget(self.ch_sunit)
+        row.add_widget(self.ch_szoom)
+        box.add_widget(row)
+        self.spec_meta = self._meta()
+        self.spec = BLSpecChart(size_hint_y=None, height=dp(230))
+        self.col.add_widget(self.spec)
+        box = self._card()
+        self.spec_txt = self._text(box, 11.5)
+
+    def _set_sunit(self, k):
+        self.sunit = k
+        self._show_spec()
+
+    def _set_szoom(self, k):
+        self.szoom = k
+        self._show_spec()
+
+    def _marks(self, act, fmax, extra_sidebands=True):
+        """Marker list: every family's fundamental, the active family's
+        harmonics, and its modulation sidebands."""
+        st = self.st
+        key = bearing_engine.defect_key(st.loc)
+        fam = "BSF" if key == "2xBSF" else key
+        out = [(act["1X"], FAM_RGB["1X"], "1X", False)]
+        for k in ("FTF", "BSF", "BPFO", "BPFI"):
+            out.append((act[k], FAM_RGB[k], k, k == fam and st.stage > 0))
+        base = act[key]
+        for h in range(1, 16):
+            fh = h * base
+            if fh > fmax:
+                break
+            if not (h == 1 and key != "2xBSF"):
+                out.append((fh, FAM_RGB[fam], ("%dxBSF" % (2 * h)) if key == "2xBSF" else "%dx" % h,
+                            st.stage > 0 and h <= 4))
+            if extra_sidebands and st.stage > 0:
+                mk = bearing_engine.mod_key(st.loc)
+                if mk:
+                    for sgn in (-1, 1):
+                        fs_ = fh + sgn * act[mk]
+                        if 0 < fs_ < fmax:
+                            out.append((fs_, (0.55, 0.58, 0.64), None, False))
+        return out
+
+    def _show_spec(self):
+        r = self.res
+        if r is None:
+            return
+        st = self.st
+        act = r["act"]
+        key = bearing_engine.defect_key(st.loc)
+        mag = r["vel_mag"] if self.sunit == "vel" else r["acc_mag"]
+        unit = "mm/s pk" if self.sunit == "vel" else "g pk"
+        hi_def = max(act["BPFI"], act["2xBSF"], act["BPFO"])
+        if self.szoom == "low":
+            f0, f1 = 0.0, min(bearing_engine.FMAX, max(4.5 * hi_def, 12 * act["1X"]))
+            band = None
+        elif self.szoom == "res":
+            f0, f1 = max(0.0, 0.4 * st.fr), min(bearing_engine.FMAX, 1.6 * st.fr)
+            band = r["band"]
+        else:
+            f0, f1 = 0.0, bearing_engine.FMAX
+            band = r["band"]
+        marks = self._marks(act, f1, True) if self.szoom == "low" else [
+            (st.fr, C_BL_ENV, "resonance", True)]
+        self.spec.set_data({"mag": mag, "df": r["df"], "f0": f0, "f1": f1, "marks": marks, "band": band,
+                            "color": C_BL_TRACE, "min_top": 0.02 if self.sunit == "vel" else 0.002,
+                            "title": unit})
+        self.spec_meta.text = ("Hz on the axis; %s; F-max 5 kHz, 6400 lines, resolution %.2f Hz, Hanning. %s"
+                               % (unit, r["df"], "Shaded: the envelope filter band." if band else
+                                  "Grey marks: modulation sidebands."))
+        sm = self.sm
+        fd = act[key]
+        v_def = sm["vel_def"]
+        v1, _ = bearing_engine.peak_near(r["vel_mag"], r["df"], act["1X"])
+        txt = ("[b]At the defect frequency (%s, %s Hz):[/b] %.3f mm/s in velocity, against %.2f mm/s at 1X. "
+               % (key, bearing_engine.fmt_hz(fd), v_def, v1))
+        if st.stage <= 2:
+            txt += ("Nothing there worth a second look - this is why a velocity spectrum and an overall level cannot "
+                    "see a bearing defect this early. ")
+        elif st.stage == 3:
+            txt += "The defect has grown big enough to show directly, with harmonics%s. " % (
+                " and sidebands" if bearing_engine.mod_key(st.loc) else "")
+        else:
+            txt += ("Running speed harmonics and half orders (looseness) and a raised noise floor now dominate; the "
+                    "bearing lines have faded. ")
+        txt += ("\n[b]High frequency (1 - 5 kHz):[/b] %.3f g RMS. Switch to Acceleration, range Around resonance: "
+                "the impacts put their energy into a hump at %.1f kHz%s." % (
+                    sm["hf"], st.fr / 1000.0, " - the 'haystack' - which grows with every stage" if st.stage >= 2
+                    else ""))
+        txt += "\n" + self._small("Acceleration weights high frequencies up (x 2 pi f relative to velocity), so it "
+                                  "shows the resonance; velocity weights them down, so it shows running speed.")
+        self.spec_txt.text = txt
+
+    # -- envelope ----------------------------------------------------------
+    def _build_envelope(self):
+        self._head("ENVELOPE (DEMODULATED) SPECTRUM")
+        box = self._card()
+        self._text(box, 11.5).text = (
+            "[b]How it works:[/b] 1. band pass the acceleration around the resonance the impacts ring, removing "
+            "running speed and everything else low; 2. rectify and smooth it - take the envelope (here the "
+            "magnitude of the analytic signal, via the Hilbert transform); 3. take the spectrum of that envelope. "
+            "Each impact becomes one bump in the envelope, so its spectrum shows how often the impacts repeat: "
+            "the defect frequency and its harmonics. Units: gE (g of envelope).")
+        row = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(6))
+        self.ch_band = Choice("Filter band", bearing_engine.ENV_BANDS, self.st.env_band, self._set_band)
+        self.ch_efmax = Choice("Envelope F-max", bearing_engine.ENV_FMAX, self.st.env_fmax, self._set_efmax)
+        row.add_widget(self.ch_band)
+        row.add_widget(self.ch_efmax)
+        box.add_widget(row)
+        self.env_meta = self._meta()
+        self.envspec = BLSpecChart(size_hint_y=None, height=dp(240))
+        self.col.add_widget(self.envspec)
+        box = self._card()
+        self.verdict = self._text(box, 12.5)
+        self.peaks_txt = self._text(box, 11, mono=True)
+        self.env_txt = self._text(box, 11.5)
+
+    def _set_band(self, k):
+        self.st.env_band = k
+        self._changed()
+
+    def _set_efmax(self, k):
+        self.st.env_fmax = k
+        self._show_env()
+
+    def _show_env(self):
+        r = self.res
+        if r is None:
+            return
+        st = self.st
+        act = r["act"]
+        fmax = bearing_engine.env_fmax(st, act)
+        self.envspec.set_data({"mag": r["env_mag"], "df": r["df"], "f0": 0.0, "f1": fmax,
+                               "marks": self._marks(act, fmax, True), "color": C_BL_ENV, "min_top": 0.002,
+                               "title": "gE pk"})
+        lo, hi = r["band"]
+        self.env_meta.text = ("Envelope of the %s - %s Hz band. 0 - %.0f Hz, %.2f Hz resolution, gE peak. Coloured "
+                              "marks: FTF, BSF, BPFO, BPFI and the active defect's harmonics; grey: its sidebands."
+                              % (_eng(lo), _eng(hi), fmax, r["df"]))
+        d = self.diag
+        self.verdict.text = "[b][color=%s]Reading:[/color][/b] %s" % (ACCENT_HEX, d["verdict"])
+        if d["peaks"]:
+            lines = ["[b]%9s %9s  %s[/b]" % ("Peak Hz", "gE", "Matches")]
+            for f, m, lab, fc in d["peaks"][:8]:
+                fam = lab.split("x")[-1].split("+")[0].split("-")[0] if lab != "?" else None
+                for kf in ("BPFO", "BPFI", "BSF", "FTF", "1X"):
+                    if kf in lab:
+                        fam = kf
+                        break
+                col = FAM_HEX.get(fam, MUTED_HEX)
+                lines.append("%9s %9.4f  [color=%s]%s[/color]%s" % (
+                    bearing_engine.fmt_hz(f), m, col, lab if lab != "?" else "not a bearing line",
+                    (" (%s)" % bearing_engine.fmt_hz(fc)) if fc else ""))
+            lines.append(self._small("Floor %.4f gE; tallest line %.0f x the floor." % (d["floor"], d["snr"])))
+            self.peaks_txt.text = "\n".join(lines)
+        else:
+            self.peaks_txt.text = self._small("No line stands clearly above the floor (%.4f gE)." % d["floor"])
+        notes = []
+        if st.env_band == "low":
+            notes.append("[color=B00020][b]Wrong band.[/b][/color] 10 - 500 Hz holds running speed and its "
+                         "harmonics, not the impacts. The envelope just follows 1X; the defect is lost. Real "
+                         "instruments make the same mistake when the filter is set too low.")
+        elif st.env_band == "wide":
+            notes.append("A wide band takes in the resonance and more noise with it; it works, but the "
+                          "floor is higher than with a band centred on the resonance.")
+        _, _, fm, q = bearing_engine.MOUNT_BY_ID[st.mount]
+        if st.mount == "hand":
+            notes.append("[color=B00020][b]Handheld probe:[/b][/color] its contact resonance is about %.1f kHz, "
+                         "so it cannot pass the %.1f kHz ring. Stud mount or a good magnet on a flat spot."
+                         % (fm / 1000.0, st.fr / 1000.0))
+        if st.stage == 1:
+            notes.append("Stage 1 is mostly above this record: a high frequency (ultrasonic, shock pulse, "
+                         "PeakVue) method sees it before envelope analysis at %.1f kHz does." % (st.fr / 1000.0))
+        if st.stage == 4:
+            notes.append("At stage 4 the impacts lose their rhythm, so the envelope spectrum loses its lines - a "
+                         "falling envelope reading at end of life is not a recovery.")
+        notes.append(self._small("The envelope ignores the frequency the impacts ring at and keeps only how often "
+                                 "they come - which is why a %.1f kHz ring gives a line at %s Hz." %
+                                 (st.fr / 1000.0, bearing_engine.fmt_hz(act[bearing_engine.defect_key(st.loc)]))))
+        self.env_txt.text = "\n\n".join(notes)
+
+    # -- stage trend -------------------------------------------------------
+    def _build_trend(self):
+        self._head("FROM NEW TO FAILED - ALL FIVE STAGES")
+        self.trend_meta = self._meta()
+        self.trendc = BLTrendChart(size_hint_y=None, height=dp(200))
+        self.col.add_widget(self.trendc)
+        self.trend_legend = self._meta()
+        self.trend_legend.text = "   ".join("[color=%s]- %s[/color]" % (h, n) for n, _, h in TREND_METRICS)
+        box = self._card()
+        self.trend_tbl = self._text(box, 10.5, mono=True)
+        self.trend_txt = self._text(box, 11.5)
+
+    def _schedule_trend(self):
+        if self._trend_ev is not None:
+            self._trend_ev.cancel()
+        self.trend_meta.text = "Working out all five stages..."
+        self._trend_ev = Clock.schedule_once(self._do_trend, 0.15)
+
+    def _do_trend(self, *a):
+        self._trend_ev = None
+        try:
+            self.trend = bearing_engine.stage_trend(self.st)
+        except Exception as exc:
+            self.trend_meta.text = "Could not compute the trend: %s" % exc
+            return
+        self.trendc.set_data(self.trend, self.st.stage)
+        self.trend_meta.text = ("This bearing and defect at every stage, each measurement scaled to its own "
+                                "highest value. Shaded: the stage you are looking at.")
+        lines = ["[b]%-8s %6s %6s %8s %8s %8s %6s[/b]" % ("Stage", "CF", "Kurt", "Acc g", "Vel mm/s", "Env gE",
+                                                          "Ultra")]
+        for t in self.trend:
+            lines.append("%-8s %6.2f %6.1f %8.3f %8.2f %8.4f %6.2f" % (
+                bearing_engine.STAGE_NAMES[t["stage"]], t["cf"], t["kurt"], t["rms"], t["vrms"], t["env"], t["hfd"]))
+        self.trend_tbl.text = "\n".join(lines)
+        cf = [t["cf"] for t in self.trend]
+        peak_s = max(range(5), key=lambda s: cf[s])
+        self.trend_txt.text = (
+            "[b]Read the shapes, not one number.[/b] The ultrasonic reading moves first (stage 1). Kurtosis and "
+            "crest factor climb while the impacts are sharp and the RMS is still low - here crest factor peaks at "
+            "stage %d (%.1f) - then fall back towards 3 at stage 4 (%.1f) because the RMS has risen with them. The "
+            "envelope line peaks at stage 2-3 and fades as the impacts lose their rhythm. Velocity RMS - the ISO "
+            "overall - barely moves until stage 3 and is highest at the end. A bearing whose crest factor is "
+            "falling while its RMS rises is getting worse, not better."
+            % (peak_s, cf[peak_s], cf[4]))
+
+    # -- reference ---------------------------------------------------------
+    def _build_reference(self):
+        self._head("WHY THIS DEFECT LOOKS LIKE THIS")
+        box = self._card()
+        self.loc_txt = self._text(box, 12)
+
+        self._head("THE FOUR STAGES OF BEARING WEAR")
+        box = self._card()
+        parts = []
+        for s in range(1, 5):
+            d = bearing_engine.STAGE_DETAIL[s]
+            what = d["what"].replace(" (here %s Hz)", "")
+            parts.append("[b][color=%s]%s[/color][/b]\n%s\n%s" % (
+                ACCENT_HEX, bearing_engine.STAGE_TITLES[s], what,
+                self._small("Ultrasonic: %s  Envelope: %s  Velocity: %s  Waveform: %s  Action: %s  Life left: %s"
+                            % (d["ultra"], d["env"], d["spec"], d["wave"], d["action"], d["life"]))))
+        self._text(box, 11.5).text = "\n\n".join(parts)
+
+        self._head("TRAPS")
+        box = self._card()
+        self._text(box, 11.5).text = (
+            "[b]Wrong speed, wrong lines.[/b] Defect frequencies scale with shaft speed. Measure the speed; a 2 % "
+            "error moves BPFI by 2 %, enough to miss the match at high harmonics.\n\n"
+            "[b]Slip.[/b] Measured lines sit about 1 % from the calculated ones (BPFO and FTF lower, BPFI higher). "
+            "Match within a couple of percent, not exactly.\n\n"
+            "[b]Non-synchronous is the clue.[/b] Bearing lines are not whole multiples of running speed: 3.58X, "
+            "5.42X. A line at exactly 4X is not a bearing.\n\n"
+            "[b]The mount decides.[/b] A handheld probe or a magnet on a curved, painted surface cannot pass a "
+            "kHz ring: the envelope reads healthy on a failing bearing.\n\n"
+            "[b]The filter band decides.[/b] The band must contain the resonance and exclude running speed.\n\n"
+            "[b]Outer race out of the load zone.[/b] A spall at the top of a gravity loaded bearing can stay quiet; "
+            "turn the outer race defect slider to 180 deg and watch the impacts nearly vanish.\n\n"
+            "[b]Stage 4 falls.[/b] Crest factor, kurtosis, envelope and even ultrasonic readings can drop at end of "
+            "life. Always trend several measurements together and look at the spectrum.")
+
+    # -- compute -----------------------------------------------------------
+    def _changed(self, *a):
+        self._stage_text()
+        self.loc_txt.text = bearing_engine.LOC_NOTES[self.st.loc]
+        self.verdict.text = "[color=%s]Computing...[/color]" % MUTED_HEX
+        self.diagram._redraw()
+        super()._changed()
+
+    def _recompute(self, *a):
+        self._pending = None
+        try:
+            self.res = bearing_engine.build(self.st)
+            self.sm = bearing_engine.summary(self.res, self.st)
+            self.diag = bearing_engine.diagnose(self.res, self.st)
+        except Exception as exc:
+            self.verdict.text = "[color=B00020]Could not build this signal: %s[/color]" % exc
+            return
+        self._show_wave()
+        self._stats_text()
+        self._show_spec()
+        self._show_env()
+        self._schedule_trend()
+
+
 # the menu, in the CM/DX shape: a card per tool, tap to open it full screen,
 # back returns here
 MENU_SUBTITLE = "Interactive teaching tools"
@@ -4515,6 +5902,8 @@ MENU = [
      (0.886, 0.400, 0.055, 1)),
     ("waveform", "Waveform Builder", "Five waves, merged waveform, spectrum and statistics",
      (0.000, 0.533, 0.565, 1)),
+    ("bearinglab", "Bearing Defect Lab", "BPFO, BPFI, BSF, FTF: impacts, envelope and wear stages",
+     (0.851, 0.467, 0.024, 1)),
 ]
 
 
@@ -4607,6 +5996,7 @@ class RootWidget(BoxLayout):
         self.sm.add_widget(ResonanceScreen(name="resonance"))
         self.sm.add_widget(PhaseSurveyScreen(name="phase"))
         self.sm.add_widget(WaveformScreen(name="waveform"))
+        self.sm.add_widget(BearingLabScreen(name="bearinglab"))
         self.add_widget(self.sm)
 
         # same credit line as the other tools, shown under the menu and

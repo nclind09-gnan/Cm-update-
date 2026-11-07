@@ -33,6 +33,7 @@ jobs:
           python -c "import ast; ast.parse(open('orbit_engine.py').read()); print('orbit_engine.py OK')"
           python -c "import ast; ast.parse(open('phase_engine.py').read()); print('phase_engine.py OK')"
           python -c "import ast; ast.parse(open('wave_engine.py').read()); print('wave_engine.py OK')"
+          python -c "import ast; ast.parse(open('bearing_engine.py').read()); print('bearing_engine.py OK')"
           python -c "import bearing_data; print('bearing_data imports OK,', len(bearing_data.DATA['data']), 'brands')"
 
       - name: Run the physics self tests
@@ -41,6 +42,7 @@ jobs:
           python orbit_engine.py
           python phase_engine.py
           python wave_engine.py
+          python bearing_engine.py
 
   build:
     needs: sanity-check

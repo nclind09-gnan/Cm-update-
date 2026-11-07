@@ -31,6 +31,11 @@ except Exception:
     _IMPORT_ERROR = traceback.format_exc()
     DATA = {"data": {}, "labels": {}}  # placeholder so the rest of the file can still load
 
+# The bearing and speed last chosen here, so the Simulation tab's Bearing
+# Defect Lab can pick them up without the two tools importing each other's
+# widgets. Plain data only.
+SHARED = {"sel": None, "rpm": None}
+
 # ---------------------------------------------------------------- palette --
 WHITE = (1, 1, 1, 1)
 BG = (0.957, 0.969, 0.984, 1)       # #F4F7FB
@@ -606,6 +611,7 @@ class RootUI(BoxLayout):
         except ValueError:
             rpm = 0
         shaft_hz = rpm / 60.0
+        SHARED["rpm"] = rpm if rpm > 0 else None
 
         if sel["source"] == "catalog":
             self.identity_label.text = f"{sel['model']}  \u00b7  {sel['brand']}"
@@ -675,6 +681,7 @@ class BearingScopeApp(App):
 
     def set_selection(self, sel):
         self.selection = sel
+        SHARED["sel"] = dict(sel)
         self.ui.refresh()
 
 
