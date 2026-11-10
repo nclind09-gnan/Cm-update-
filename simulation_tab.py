@@ -4560,6 +4560,10 @@ class MenuScreen(Screen):
         self.add_widget(scroll)
 
 
+SCREENS = {"balance": BalanceDemoScreen, "fault": FaultSignatureScreen, "orbit": OrbitScreen,
+           "resonance": ResonanceScreen, "phase": PhaseSurveyScreen, "waveform": WaveformScreen}
+
+
 class RootWidget(BoxLayout):
     """Owns the section menu and screen manager, and exposes handle_back()
     for main.py's hardware back button."""
@@ -4601,12 +4605,9 @@ class RootWidget(BoxLayout):
 
         self.sm = ScreenManager(transition=NoTransition())
         self.sm.add_widget(MenuScreen(on_pick=self.open_tool))
-        self.sm.add_widget(BalanceDemoScreen(name="balance"))
-        self.sm.add_widget(FaultSignatureScreen(name="fault"))
-        self.sm.add_widget(OrbitScreen(name="orbit"))
-        self.sm.add_widget(ResonanceScreen(name="resonance"))
-        self.sm.add_widget(PhaseSurveyScreen(name="phase"))
-        self.sm.add_widget(WaveformScreen(name="waveform"))
+        # sub-tools are built the first time they are opened, so the
+        # Simulation menu appears without waiting for all six
+        self._pending = None
         self.add_widget(self.sm)
 
         # same credit line as the other tools, shown under the menu and
@@ -4623,7 +4624,26 @@ class RootWidget(BoxLayout):
         self.show_menu()
 
     def open_tool(self, name):
+        if not self.sm.has_screen(name):
+            # update the header now; build on the next frame so the new
+            # title is already on screen while the tool is being made
+            self._pending = name
+            self._set_header(name)
+            self.subtitle.text = "Opening..."
+            Clock.schedule_once(lambda dt: self._finish_open(name), 0.05)
+            return
+        self._pending = None
         self.sm.current = name
+        self._set_header(name)
+
+    def _finish_open(self, name):
+        if self._pending != name:
+            return                       # back was pressed before it opened
+        if not self.sm.has_screen(name):
+            self.sm.add_widget(SCREENS[name](name=name))
+        self.open_tool(name)
+
+    def _set_header(self, name):
         for key, title, subtitle, _accent in MENU:
             if key == name:
                 self.title.text = "[b]%s[/b]" % title
@@ -4633,6 +4653,7 @@ class RootWidget(BoxLayout):
         self.back_btn.disabled = False
 
     def show_menu(self):
+        self._pending = None
         self.sm.current = "menu"
         self.title.text = "[b]Simulation[/b]"
         self.subtitle.text = MENU_SUBTITLE
@@ -4642,7 +4663,7 @@ class RootWidget(BoxLayout):
     def handle_back(self):
         """Inside a tool, back returns to the menu; from the menu, main.py
         falls through to Home. Same unwinding as CM/DX."""
-        if self.sm.current != "menu":
+        if self.sm.current != "menu" or self._pending:
             self.show_menu()
             return True
         return False

@@ -12,13 +12,15 @@ its own internal logic untouched:
   - Vibration Basics (basics_tab.py) - foundational vibration-analysis reference
   - Simulation     (simulation_tab.py) - interactive balance demo and teaching tools
 
-The app opens on a Home screen with five cards. Tapping a card opens
-that tool full-screen with its own back bar - none of them auto-opens
-on launch.
+The app opens on a Home screen with one card per tool. Tapping a card
+opens that tool full-screen with its own back bar. Each tool is built the
+first time it is opened (a short "Opening ..." screen shows meanwhile), not
+at launch, so the app starts quickly; after that it stays in memory.
 """
 import traceback
 
 from kivy.app import App
+from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp, sp
 from kivy.uix.behaviors import ButtonBehavior
@@ -60,6 +62,16 @@ CARD_SPECS = [
 TOOL_TITLES = {"cmdx": "CM/DX", "rotor": "Rotor Balance", "bearing": "Bearing Freq",
                "laser": "Laser Align", "turbo": "Turbomachinery", "basics": "Vibration Basics",
                "sim": "Simulation"}
+
+
+TOOL_MODULES = {"cmdx": ("cmdx_tab", "CMDXApp"), "rotor": ("rotor_tab", "BalanceApp"),
+                "bearing": ("bearing_tab", "BearingScopeApp"), "laser": ("laser_tab", "LaserAlignApp"),
+                "turbo": ("turbo_tab", "TurboApp"), "basics": ("basics_tab", "BasicsApp"),
+                "sim": ("simulation_tab", "SimulationApp")}
+
+
+def _accent(name):
+    return next(a for n, _, _, a in CARD_SPECS if n == name)
 
 
 def _fit_label(label):
@@ -105,6 +117,25 @@ class HomeScreen(Screen):
     def _redraw(self, *a):
         self._bg.pos = self.pos
         self._bg.size = self.size
+
+
+class LoadingScreen(Screen):
+    """Shown for a moment the first time a tool is opened, while it is built."""
+
+    def __init__(self, **kwargs):
+        super().__init__(name="loading", **kwargs)
+        with self.canvas.before:
+            self._bg_color = Color(*TAB_BG["home"])
+            self._bg = Rectangle(pos=(0, 0), size=self.size)
+        self.bind(size=lambda w, v: setattr(self._bg, "size", v))
+        self.label = Label(text="", font_size=sp(17), bold=True, color=WHITE)
+        self.add_widget(self.label)
+
+    def show(self, title, bg, accent):
+        self._bg_color.rgba = bg
+        dark = (bg[0] + bg[1] + bg[2]) < 1.5
+        self.label.color = WHITE if dark else accent
+        self.label.text = "Opening %s..." % title
 
 
 def _safe_build(build_fn, label):
@@ -162,61 +193,29 @@ class CMToolkitApp(App):
 
         self.sm = ScreenManager(transition=FadeTransition(duration=0.12))
         self.sm.add_widget(HomeScreen(on_pick=self.switch))
+        self.sm.add_widget(LoadingScreen())
 
-        try:
-            import cmdx_tab
-            cmdx_root = _safe_build(lambda: cmdx_tab.CMDXApp().build(), "CM/DX")
-        except Exception:
-            cmdx_root = _safe_build(lambda: (_ for _ in ()).throw(Exception(traceback.format_exc())), "CM/DX")
-
-        try:
-            import rotor_tab
-            rotor_root = _safe_build(lambda: rotor_tab.BalanceApp().build(), "Rotor Balance")
-        except Exception:
-            rotor_root = _safe_build(lambda: (_ for _ in ()).throw(Exception(traceback.format_exc())), "Rotor Balance")
-
-        try:
-            import bearing_tab
-            bearing_root = _safe_build(lambda: bearing_tab.BearingScopeApp().build(), "Bearing Freq")
-        except Exception:
-            bearing_root = _safe_build(lambda: (_ for _ in ()).throw(Exception(traceback.format_exc())), "Bearing Freq")
-
-        try:
-            import laser_tab
-            laser_root = _safe_build(lambda: laser_tab.LaserAlignApp().build(), "Laser Align")
-        except Exception:
-            laser_root = _safe_build(lambda: (_ for _ in ()).throw(Exception(traceback.format_exc())), "Laser Align")
-
-        try:
-            import turbo_tab
-            turbo_root = _safe_build(lambda: turbo_tab.TurboApp().build(), "Turbomachinery")
-        except Exception:
-            turbo_root = _safe_build(lambda: (_ for _ in ()).throw(Exception(traceback.format_exc())), "Turbomachinery")
-
-        try:
-            import basics_tab
-            basics_root = _safe_build(lambda: basics_tab.BasicsApp().build(), "Vibration Basics")
-        except Exception:
-            basics_root = _safe_build(lambda: (_ for _ in ()).throw(Exception(traceback.format_exc())), "Vibration Basics")
-
-        try:
-            import simulation_tab
-            sim_root = _safe_build(lambda: simulation_tab.SimulationApp().build(), "Simulation")
-        except Exception:
-            sim_root = _safe_build(lambda: (_ for _ in ()).throw(Exception(traceback.format_exc())), "Simulation")
-
-        self.tool_roots = {"cmdx": cmdx_root, "rotor": rotor_root, "bearing": bearing_root,
-                            "laser": laser_root, "turbo": turbo_root, "basics": basics_root,
-                            "sim": sim_root}
-
-        for name, widget in (("cmdx", cmdx_root), ("rotor", rotor_root), ("bearing", bearing_root),
-                              ("laser", laser_root), ("turbo", turbo_root), ("basics", basics_root),
-                              ("sim", sim_root)):
-            self.sm.add_widget(_tool_screen(name, widget, on_back=lambda: self.switch("home")))
+        # Tools are built the first time they are opened, not at launch, so
+        # the Home screen appears straight away. Once built a tool is kept,
+        # so opening it again is instant and keeps whatever you entered.
+        self.tool_roots = {}
+        self._pending = None
 
         self.sm.current = "home"
         Window.bind(on_keyboard=self._on_keyboard)
         return self.sm
+
+    def _build_tool(self, name):
+        module, cls = TOOL_MODULES[name]
+        label = TOOL_TITLES[name]
+
+        def make():
+            mod = __import__(module)
+            return getattr(mod, cls)().build()
+
+        root = _safe_build(make, label)
+        self.tool_roots[name] = root
+        self.sm.add_widget(_tool_screen(name, root, on_back=lambda: self.switch("home")))
 
     def _on_keyboard(self, window, key, *args):
         """Intercept the Android hardware/gesture back button (keycode 27).
@@ -229,6 +228,9 @@ class CMToolkitApp(App):
             return False
         if self.sm.current == "home":
             return False
+        if self.sm.current == "loading":
+            self.switch("home")
+            return True
         tool = self.tool_roots.get(self.sm.current)
         if tool is not None and hasattr(tool, "handle_back") and tool.handle_back():
             return True
@@ -236,8 +238,26 @@ class CMToolkitApp(App):
         return True
 
     def switch(self, name):
+        if name != "home" and name not in self.tool_roots:
+            # show "Opening ..." first, then build on a later frame so the
+            # message is on screen while the tool is being made
+            self._pending = name
+            Window.clearcolor = TAB_BG[name]
+            loading = self.sm.get_screen("loading")
+            loading.show(TOOL_TITLES[name], TAB_BG[name], _accent(name))
+            self.sm.current = "loading"
+            Clock.schedule_once(lambda dt: self._finish_open(name), 0.18)
+            return
+        self._pending = None
         Window.clearcolor = TAB_BG[name]
         self.sm.current = name
+
+    def _finish_open(self, name):
+        if self._pending != name:
+            return                       # user went back before it opened
+        if name not in self.tool_roots:
+            self._build_tool(name)
+        self.switch(name)
 
 
 if __name__ == "__main__":
