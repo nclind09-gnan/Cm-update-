@@ -3,7 +3,7 @@ Bearing Defect Frequency Scope — mobile app (Kivy)
 Built by Gnaneswar
 
 Catalog search across 18 manufacturers / 14,535 bearings, a custom-geometry
-calculator, and an ISO 10816-3 vibration severity reference — all offline,
+calculator, and an ISO 10816-1 (Class I-IV) vibration severity reference — all offline,
 no internet needed once installed.
 """
 

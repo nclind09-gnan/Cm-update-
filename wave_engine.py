@@ -255,7 +255,8 @@ def stats_rows(s):
         ("Peak (-)", "%.2f mm/s" % s["tr"], "lowest point"),
         ("Peak-to-peak", "%.2f mm/s" % s["pp"], "the full swing"),
         ("RMS", "%.2f mm/s" % s["rms"], "sqrt(sum A^2/2) = %.2f: RMS adds by squares, not by amplitudes" % s["rms_th"]),
-        ("Crest factor", "%.2f" % cf, "about 1.41: a near-pure sine" if cf < 1.6 else
+        ("Crest factor", "%.2f" % cf, "below a sine's 1.41: a flattened, rounded-top waveform" if cf < 1.35 else
+         "about 1.41: a near-pure sine" if cf < 1.6 else
          ("smooth periodic signal; no impacting" if cf < 3.5 else "high: sharp peaks well above the RMS, as impacts produce")),
         ("Asymmetry +/-", "%.2f" % asym, "symmetric about zero" if abs(asym - 1) < 0.1 else
          ("positive side reaches further" if asym > 1 else "negative side reaches further")),

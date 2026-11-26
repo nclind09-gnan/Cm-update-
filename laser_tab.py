@@ -284,7 +284,7 @@ class SoftFootScreen(Screen):
             val = abs(safe_float(ti.text, 0))
             if val > SOFT_FOOT_THRESHOLD_MM:
                 any_soft = True
-                shim = val - SOFT_FOOT_THRESHOLD_MM if val > SOFT_FOOT_THRESHOLD_MM else 0
+                shim = val            # shim the full measured gap (parallel soft foot)
                 self.result_body.add_widget(body_label(
                     "%s: %.2f mm - SOFT FOOT (shim ~%.2f mm)" % (name, val, shim), BAD))
             else:
@@ -294,7 +294,9 @@ class SoftFootScreen(Screen):
         else:
             self.result_body.add_widget(body_label(
                 "Correct soft foot before proceeding with coupling alignment - it will "
-                "throw off offset/angularity readings otherwise.", MUTED))
+                "throw off offset/angularity readings otherwise. The shim shown is the full gap, "
+                "right for a parallel soft foot; if the gap differs across the foot (angled or "
+                "bent foot), inspect and step-shim rather than adding one shim.", MUTED))
 
 
 # ------------------------------------------------------------------

@@ -4241,7 +4241,7 @@ class WaveformScreen(_ToolScreen):
             "spectrum takes it apart again into the same five lines, at the same heights.\n\n"
             "[b]Peaks add, RMS does not.[/b] If all five peaks happened to line up the peak would be the sum of "
             "the amplitudes, but the RMS is the square root of the sum of squares. That gap is why the crest "
-            "factor of a complex waveform is above 1.41.\n\n"
+            "factor of a complex waveform is usually above 1.41.\n\n"
             "[b]Two close frequencies[/b] (try the Beat preset) make the merged waveform swell and fade. The "
             "spectrum shows two lines only if the lines of resolution can split them.\n\n"
             "[b]Wave frequency 0 Hz[/b] is a constant offset (DC), which most vibration instruments filter out.")

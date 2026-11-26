@@ -8,8 +8,10 @@ Five sub-tabs:
   4. Weight Split   - resolve one correction onto two fixed positions
   5. Trim Balance   - reuse a known sensitivity, no new trial run
 
-Angle convention: measured CLOCKWISE from the phase reference mark
-(keyphasor), as viewed from the sensor end.
+Angle convention: weight positions are counted from the phase reference
+mark (keyphasor) AGAINST the direction of rotation - the same direction phase
+lag is counted - so the vector maths holds whichever way the shaft turns.
+(Lead readings are converted to lag first by the Phase Lead option.)
 """
 
 import cmath
@@ -813,8 +815,9 @@ class BalanceApp(App):
         scroll, form = scroll_form()
 
         form.add_widget(note_label(
-            f"[color={MUTED_HEX}][size=14]Angles measured clockwise from the "
-            "phase reference mark, as viewed from the sensor end.[/size][/color]"))
+            f"[color={MUTED_HEX}][size=14]Weight angles are counted from the phase "
+            "reference mark AGAINST the direction of rotation (the way phase lag is "
+            "counted), whichever way the shaft turns.[/size][/color]"))
 
         panel = Panel(size_hint_y=None)
         panel.bind(minimum_height=panel.setter("height"))
@@ -915,11 +918,11 @@ class BalanceApp(App):
 
         if self.single_trial_removed:
             action = ("Remove the trial weight, then install the correction weight\n"
-                      "at the stated angle (clockwise from the reference mark).")
+                      "at the stated angle (from the reference mark, against rotation).")
             headline = f"CORRECTION WEIGHT: {wc_mag:.2f} @ {wc_ang:.1f}\u00b0"
         else:
             action = ("Leave the trial weight where it is and add the extra weight\n"
-                      "shown above at the stated angle (clockwise from the reference mark).")
+                      "shown above at the stated angle (from the reference mark, against rotation).")
             headline = f"ADD: {add_mag:.2f} @ {add_ang:.1f}\u00b0"
 
         self.last_sensitivity = (s_mag, s_ang)
@@ -1323,9 +1326,11 @@ class BalanceApp(App):
                     f"[color={ERROR_HEX}]Enter the number of positions and the offset.[/color]")
                 return
             n = int(round(count))
-            if n < 2:
+            if n < 3:
+                # two equally spaced positions are 180 deg apart: they cannot
+                # make a weight at any other angle
                 self.sp_result.text = (
-                    f"[color={ERROR_HEX}]There must be at least 2 positions.[/color]")
+                    f"[color={ERROR_HEX}]There must be at least 3 equally spaced positions.[/color]")
                 return
             if n > 360:
                 self.sp_result.text = (

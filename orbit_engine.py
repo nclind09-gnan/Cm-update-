@@ -142,11 +142,11 @@ CONDITIONS = [
      "phase": "X and Y 1X phases move towards being 0 or 180 deg apart rather than 90: the motion is close to a straight line.",
      "try": "Raise severity in steps of 2 and watch ellipse to banana to figure-eight. Then switch the filter to 2X."},
 
-    {"id": "rub", "name": "Partial rub", "rpm": 3600, "sev": 6,
+    {"id": "rub", "name": "Partial rub", "rpm": 5000, "sev": 6,
      "note": "The shaft touches a seal or bearing for part of every revolution. Contact stiffens the rotor for a moment and the friction drags the surface backwards against rotation, so the orbit is clipped where it touches and gets kicked.",
      "orbit": ["A flattened or dented side where the contact is - the orbit cannot pass the seal.",
                "Sharp corners at the contact, meaning harmonics (2X, 3X).",
-               "At heavier rub, 1/2X appears and the orbit shows TWO Keyphasor dots and an inner loop.",
+               "At heavier rub with the shaft running above twice its first critical, 1/2X appears and the orbit shows TWO Keyphasor dots and an inner loop. Drop the speed below twice the critical and the 1/2X goes.",
                "Friction at contact pushes the precession towards reverse for a moment."],
      "phase": "The 1X phase becomes unsteady in a real machine (thermal bow from the rub point). Here, watch the harmonics in the full spectrum.",
      "try": "Set the filter to Not-1X to strip out the 1X and see what the rub is adding."},
@@ -227,7 +227,7 @@ def components(st):
     elif c == "rub":
         comps.append(forced(rot, rpm, 1, ecc * 1.4, rot.hs_deg, "unb"))
         rub = s
-        if s >= 5:
+        if s >= 5 and rpm > 2.0 * rot.crit_weak():
             # partial rub above twice the critical: a forward 1/2X
             a1 = 0.5 * (abs(comps[0][1]) + abs(comps[0][2]))
             a = 0.07 * (s - 4.0) * a1
@@ -883,6 +883,7 @@ def self_test(verbose=True):
     st = OrbitSettings()
     st.cond = "rub"
     st.sev = 6.0
+    st.rpm = 5000.0
     rr = compute_orbit(st)
     if rr["sub"] is None or not near(rr["sub"][0], 0.5, 0.02) or \
             rr["sub"][1] < 0.1 * rr["probes"]["X"]["x1_pp"]:

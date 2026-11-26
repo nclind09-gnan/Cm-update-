@@ -202,7 +202,7 @@ def bearing_orders(b):
 
 # ISO 10816-3 evaluation zones, velocity RMS mm/s over 10-1000 Hz
 ISO_GROUPS = [
-    {"id": "g2r", "name": "Medium 15-300 kW, rigid",    "ab": 1.4, "bc": 2.8, "cd": 7.1},
+    {"id": "g2r", "name": "Medium 15-300 kW, rigid",    "ab": 1.4, "bc": 2.8, "cd": 4.5},
     {"id": "g2f", "name": "Medium 15-300 kW, flexible", "ab": 2.3, "bc": 4.5, "cd": 7.1},
     {"id": "g1r", "name": "Large >300 kW, rigid",       "ab": 2.3, "bc": 4.5, "cd": 7.1},
     {"id": "g1f", "name": "Large >300 kW, flexible",    "ab": 3.5, "bc": 7.1, "cd": 11.0},
@@ -315,7 +315,7 @@ def _f_rub(c):
     return {"comps": comps, "clip": 0.62 - 0.18 * s, "env_band": fr,
             "rand": [_band(f1 * 5, c["nyq"], accG=0.004 * s),
                      _band(fr * 0.7, fr * 1.3, accG=0.02 * s)],
-            "impacts": [(f1, fr, 0.9 * s, 16.0)],
+            "impacts": [(f1 / 2.0, fr, 0.9 * s, 16.0)],      # contact every 2nd turn
             "marks": [(f1 / 3.0, "1/3X"), (f1 / 2.0, "1/2X"), (f1, "1X"), (2 * f1, "2X")]}
 
 
@@ -327,7 +327,8 @@ def _f_whirl(c):
 
 def _f_whip(c):
     s, f1 = c["s"], c["f1"]
-    fc = c["fcrit"] if f1 > 2.1 * c["fcrit"] else 0.45 * f1
+    # whirl at 0.45X until it reaches the critical, then it locks there
+    fc = min(0.45 * f1, c["fcrit"])
     return {"comps": [(fc, 9 * s), (f1, 1.8 * s)],
             "marks": [(fc, "whip"), (f1, "1X")]}
 
@@ -504,7 +505,7 @@ def _f_resonance(c):
     denom = math.sqrt((1 - ratio ** 2) ** 2 + (ratio / q) ** 2)
     amp = (1.2 / denom) if denom > 1e-6 else 1.2
     amp = min(amp, 14.0)
-    return {"comps": [(f1, amp * s), (2 * f1, 0.5 * s), (fn, 1.6 * s)],
+    return {"comps": [(f1, amp * s), (2 * f1, 0.5 * s)],
             "rand": [_band(fn * 0.9, fn * 1.1, velMM=0.08 * s)],
             "marks": [(f1, "1X"), (fn, "natural freq")]}
 
@@ -531,7 +532,7 @@ def _f_turbulence(c):
 FAULTS = [
     {"id": "unbalance", "name": "Unbalance", "fam": "Rotor", "group": "Rotor & coupling",
      "fmax": 500, "wf_rev": 8, "build": _f_unbalance,
-     "note": "A heavy spot throws a rotating centrifugal force once per revolution. The force rises with the square of speed, so the 1X line grows four times when speed doubles.",
+     "note": "A heavy spot throws a rotating centrifugal force once per revolution. The force rises with the square of speed: double the speed and the force is four times larger (below resonance displacement grows about 4x, velocity about 8x).",
      "look": ["1X dominant, with very little else in the spectrum.",
               "Radial far exceeds axial, except on an overhung rotor.",
               "No harmonics worth the name; a large 2X points elsewhere.",
@@ -586,7 +587,7 @@ FAULTS = [
               "Half order lines at 0.5X, 1.5X, 2.5X when the rotor repeats only every second revolution.",
               "The low frequency region fills with lines rather than showing two or three clean peaks.",
               "Strongly directional, worst along the axis the clearance allows."],
-     "wave": "Erratic and NOT repeatable turn to turn. Successive revolutions differ in amplitude and shape, peaks are ragged, and small impacts appear where the rotor takes up clearance. Overlay two revolutions and they will not sit on top of one another. That non repeatability is the clearest symptom, and it separates this from structural looseness, which repeats faithfully.",
+     "wave": "Clipped and distorted, with the pattern repeating only every SECOND revolution because of the half order content. On a real machine it is also erratic: successive revolutions differ in amplitude and shape and small impacts appear where the rotor takes up clearance (this simulation keeps the pattern regular so the half order repeat can be timed).",
      "phys": "Half order content means the motion repeats every two revolutions, not every one. That is a clearance signature and close to unambiguous."},
 
     {"id": "rub", "name": "Rotor rub", "fam": "Contact", "group": "Looseness & rub",
@@ -606,7 +607,7 @@ FAULTS = [
               "It tracks shaft speed: raise the speed and it moves with it.",
               "Journal bearings only; it cannot happen in a rolling element bearing.",
               "Often cured by changing oil temperature, viscosity or bearing loading."],
-     "wave": "Two sine waves of close but unequal frequency, running speed and roughly half of it, so the trace shows a slow beat swelling and shrinking over about two revolutions. The pattern repeats every second revolution rather than every one.",
+     "wave": "A large slow sine at about 0.44X (one cycle every 2.3 revolutions or so) with the smaller 1X cycle riding on it. Because 0.44 is not exactly a half, successive revolutions drift against one another and the pattern never quite repeats.",
      "phys": "Compare with Oil whip. Whirl follows speed; whip stops following and parks on the rotor's natural frequency. That difference is the whole diagnosis."},
 
     {"id": "whip", "name": "Oil whip", "fam": "Fluid-film", "group": "Fluid film",
@@ -617,16 +618,16 @@ FAULTS = [
               "Amplitudes can be violent and the condition is unstable.",
               "Needs a bearing design change, not an adjustment."],
      "wave": "A large, almost pure sine at the natural frequency with the smaller running speed cycle riding on it. Because the two are not harmonically related the pattern never repeats exactly; successive revolutions drift against one another.",
-     "phys": "Drag the shaft speed slider and watch this line stay still while the 1X marker moves past it. That behaviour names the fault."},
+     "phys": "The rotor critical here is the Resonance setting / 55 (2800 Hz gives about 51 Hz, too high to reach). Lower Resonance to about 1000 Hz (critical about 18 Hz), then drag the shaft speed up past about 2400 rpm: the line climbs at 0.45X until it reaches the critical and then stays still while the 1X marker keeps moving. That behaviour names the fault."},
 
     {"id": "brg1", "name": "Bearing - stage 1", "fam": "Rolling bearing", "group": "Rolling bearing",
      "fmax": 40000, "lines": 800, "wf_rev": 1, "build": _f_brg1,
-     "note": "Subsurface fatigue has begun. There is no visible damage, no defect frequency and nothing in the velocity spectrum, only microscopic stress waves from material being worked below the surface, up in the ultrasonic region.",
+     "note": "Subsurface fatigue or the very first microscopic damage has begun. There is no visible damage and nothing in the velocity spectrum, only weak stress waves up in the ultrasonic region.",
      "look": ["Nothing in the velocity spectrum, and nothing at the defect frequencies.",
               "All the evidence is above about 10 kHz. Raise F-max to 40 kHz and a low broad rise appears; at 1 kHz the bearing looks perfect.",
-              "No discrete peaks even up there: it is random stress wave energy, not a tone.",
+              "No useful peaks in the ordinary spectrum even up there: the stress waves are very weak bursts buried in random energy.",
               "Found by shock pulse, PeakVue, spike energy or high frequency envelope. Nothing else will see it."],
-     "wave": "Nothing at all in a velocity or acceleration trace. A high frequency demodulated trace shows very low level random spikes with no pattern you could time. There is no repeating impact yet because there is no spall to strike.",
+     "wave": "Nothing at all in a velocity or acceleration trace. Only a high frequency demodulated (envelope / PeakVue) trace shows very weak spikes, faintly repeating at the defect rate.",
      "phys": "Roughly 80 to 90 percent of the bearing's life is still ahead of it. Set F-max to 1 kHz and this bearing reads as healthy; that is not the instrument failing, it is the wrong band. Switch to Envelope to pull the defect rate out of the stress wave band."},
 
     {"id": "brg2", "name": "Bearing - stage 2", "fam": "Rolling bearing", "group": "Rolling bearing",
@@ -706,17 +707,17 @@ FAULTS = [
               "It does NOT sit at an exact order of shaft speed on an induction motor.",
               "Disappears the instant power is removed. That is the definitive test.",
               "Needs resolution to separate from a nearby running speed harmonic."],
-     "wave": "A beat. 2x line frequency and 2x running speed are close but not equal, so the trace swells and fades at the difference between them, often once or twice a second. A slow regular pulsing envelope on an otherwise ordinary trace is the signature, and you can hear it as well as see it.",
+     "wave": "A beat. 2x line frequency and the running speed harmonic nearest to it are close but not equal, so the trace swells and fades at the difference between them, often once or twice a second. A slow regular pulsing envelope on an otherwise ordinary trace is the signature, and you can hear it as well as see it.",
      "phys": "On a 2 pole 50 Hz motor the shaft turns near 49.5 Hz, so 2X running speed sits at 99 Hz while 2x line frequency is exactly 100 Hz - 1 Hz apart. On a 4 pole machine at 1485 rpm the shaft turns near 24.75 Hz and it is 4X that lands at 99 Hz. Either way you need the resolution to split them: raise the lines until the two separate. That is why resolution matters."},
 
     {"id": "rotorbar", "name": "Broken rotor bar", "fam": "Motor", "group": "Electrical",
      "fmax": 200, "lines": 1600, "wf_rev": 20, "build": _f_rotorbar,
      "note": "A cracked or broken rotor bar makes the rotor magnetically asymmetric, so the torque dips each time the fault slips past a pole. The result is 1X modulated at pole pass frequency.",
      "look": ["Sidebands around 1X spaced at pole pass frequency, usually only 1 to 3 Hz away.",
-              "Sidebands also appear around the running speed harmonics.",
+              "On real motors sidebands often appear around the running speed harmonics too (here only 1X is modulated).",
               "Amplitude is often modest; the spacing is the diagnosis.",
               "Needs high resolution and a long measurement to resolve."],
-     "wave": "The 1X sine with a slow amplitude modulation: it swells and fades a few times a second at pole pass frequency. You must look at a long record to see it. At eight revolutions the envelope is invisible; at twenty it becomes obvious. Set the waveform span to Full record and the beating stands out.",
+     "wave": "The 1X sine with a slow amplitude modulation: it swells and fades at pole pass frequency, typically once every one or two seconds. You must look at a long record to see it: at eight or twenty revolutions you see less than one swell. Set the waveform span to Full record and the beating stands out.",
      "phys": "Pole pass frequency = poles x slip speed. At a few hertz, 400 lines will never resolve it. Try 400 lines and then 3200 and watch the sidebands appear."},
 
     {"id": "softfoot", "name": "Soft foot", "fam": "Mounting", "group": "Rotor & coupling",
@@ -844,7 +845,11 @@ def context(st):
     # stationary outer race under steady load is essentially unmodulated
     mod_order = 1.0 if st.defect == "bpfi" else (o["ftf"] if st.defect == "bsf" else 0.0)
     ns = 120.0 * st.lf / st.poles
-    ppf = max(0.15, st.poles * max(0.0, ns - st.rpm) / 60.0)
+    # slip of a running induction motor is a fraction of a percent to a few
+    # percent; a speed/pole/supply combination outside that is not a real
+    # operating point, so hold the slip to that range for the pole pass line
+    slip_rpm = min(max(ns - st.rpm, 0.003 * ns), 0.06 * ns)
+    ppf = st.poles * slip_rpm / 60.0
     return {
         "f1": f1, "fs": fs, "nyq": fs / 2.0, "s": st.sev / 10.0, "bg": st.bg,
         "fr": st.fr, "fcrit": max(8.0, st.fr / 55.0),
