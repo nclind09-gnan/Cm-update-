@@ -1174,8 +1174,9 @@ class MenuScreen(Screen):
         col = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(14), size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
 
-        col.add_widget(Label(text="[b]CM/DX[/b]  condition monitoring diagnostics", markup=True,
-                              color=TEXT, size_hint_y=None, height=dp(36)))
+        self.heading = Label(text="[b]CM/DX[/b]  condition monitoring diagnostics", markup=True,
+                             color=TEXT, size_hint_y=None, height=dp(36))
+        col.add_widget(self.heading)
 
         for name, title, subtitle in self.SECTIONS:
             card = NavCard(title, subtitle, AMBER, card_bg=PANEL,
@@ -1195,8 +1196,10 @@ class RootWidget(BoxLayout):
     def __init__(self, **kw):
         super().__init__(orientation="vertical", **kw)
 
+        self._bar = None
         self.sm = ScreenManager(transition=NoTransition())
-        self.sm.add_widget(MenuScreen(on_pick=self.enter))
+        self.menu = MenuScreen(on_pick=self.enter)
+        self.sm.add_widget(self.menu)
         self.sm.add_widget(WizardScreen(name="wizard"))
         self.sm.add_widget(SpectrumScreen(name="spectrum"))
         self.sm.add_widget(LibraryScreen(name="library"))
@@ -1231,13 +1234,31 @@ class RootWidget(BoxLayout):
             self.show_error(traceback.format_exc())
             return
         self.sm.current = screen_name
-        self.subbar.height = dp(46)
-        self.subbar.opacity = 1
+        if self._bar:
+            # the app header shows where you are; its Back returns here
+            title = dict((n, t) for n, t, _ in MenuScreen.SECTIONS).get(screen_name, "CM/DX")
+            self._bar("CM/DX  >  " + title, "")
+        else:
+            self.subbar.height = dp(46)
+            self.subbar.opacity = 1
 
     def go_menu(self):
         self.sm.current = "menu"
         self.subbar.height = 0
         self.subbar.opacity = 0
+        if self._bar:
+            self._bar("CM/DX", "Condition monitoring diagnostics")
+
+    def bind_bar(self, set_bar):
+        """Called by main.py: use the app's header bar instead of our own
+        heading and '< CM/DX Menu' strip."""
+        self._bar = set_bar
+        if self.menu.heading.parent is not None:
+            self.menu.heading.parent.remove_widget(self.menu.heading)
+        if self.sm.current == "menu":
+            self.go_menu()
+        else:
+            self.enter(self.sm.current)
 
     def handle_back(self):
         """Called by main.py on the Android hardware back button. Return

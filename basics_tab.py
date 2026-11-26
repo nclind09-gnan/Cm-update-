@@ -3463,6 +3463,7 @@ class SubtopicListScreen(Screen):
         self.title_lbl = Label(text="", bold=True, font_size=sp(16), color=TEXT)
         bar.add_widget(self.title_lbl)
         root.add_widget(bar)
+        self.bar = bar
 
         self.scroll = ScrollView()
         self.col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(14), size_hint_y=None)
@@ -3500,9 +3501,10 @@ class TopicListScreen(Screen):
         col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(14), size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
 
-        col.add_widget(Label(text="[b]Vibration Basics[/b]", markup=True, color=TEXT,
-                              size_hint_y=None, height=dp(30), font_size=dp(18),
-                              halign="left", valign="middle"))
+        self.heading = Label(text="[b]Vibration Basics[/b]", markup=True, color=TEXT,
+                             size_hint_y=None, height=dp(30), font_size=dp(18),
+                             halign="left", valign="middle")
+        col.add_widget(self.heading)
         intro = body_label(
             "The foundational concepts the rest of the app builds on. Tap a topic to see its "
             "sub-topics.")
@@ -3542,14 +3544,33 @@ class RootWidget(BoxLayout):
         self.sm.add_widget(self.sub_screen)
         self.add_widget(self.sm)
 
+    _bar = None
+
+    def bind_bar(self, set_bar):
+        """Called by main.py: the app header shows the title and its Back
+        button steps out of a topic, so our own title and the topic screen's
+        '< Back' strip are dropped."""
+        self._bar = set_bar
+        h = self.topics_screen.heading
+        if h.parent is not None:
+            h.parent.remove_widget(h)
+        b = self.sub_screen.bar
+        if b.parent is not None:
+            b.parent.remove_widget(b)
+        set_bar("Vibration Basics", "Foundational vibration-analysis concepts")
+
     def open_topic(self, topic):
         self.sm.transition.direction = "left"
         self.sub_screen.populate(topic, self.open_subtopic_popup)
         self.sm.current = "basics_subtopics"
+        if self._bar:
+            self._bar("Basics  >  " + topic["name"], "%d sub-topics" % len(topic["subtopics"]))
 
     def go_back_to_topics(self):
         self.sm.transition.direction = "right"
         self.sm.current = "basics_topics"
+        if self._bar:
+            self._bar("Vibration Basics", "Foundational vibration-analysis concepts")
 
     def open_subtopic_popup(self, subtopic):
         content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))

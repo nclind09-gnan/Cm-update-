@@ -69,9 +69,13 @@ def _fit(label):
     return label
 
 
-def section_label(text, color=ACCENT):
-    return _fit(Label(text=text, color=color, bold=True, font_size=sp(15),
-                       halign="left", valign="bottom", size_hint_y=None, height=dp(26)))
+def section_label(text, color=ACCENT, size=15):
+    # grows to fit when the text wraps, so a long label never runs into
+    # the field or line below it
+    lbl = _fit(Label(text=text, color=color, bold=True, font_size=sp(size),
+                      halign="left", valign="bottom", size_hint_y=None, height=dp(26)))
+    lbl.bind(texture_size=lambda w, ts: setattr(w, "height", max(dp(22), ts[1] + dp(4))))
+    return lbl
 
 
 def body_label(text, color=TEXT):
@@ -82,13 +86,14 @@ def body_label(text, color=TEXT):
 
 
 def field(hint, default=""):
-    return ModernInput(hint_text=hint, text=default, multiline=False, height=dp(44),
-                        accent=ACCENT)
+    return ModernInput(hint_text=hint, text=default, multiline=False, height=dp(48),
+                        accent=ACCENT, font_size=sp(15))
 
 
 def labeled_field(label_text, hint, default=""):
-    box = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(68), spacing=dp(2))
-    box.add_widget(section_label(label_text, MUTED))
+    box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
+    box.bind(minimum_height=box.setter("height"))
+    box.add_widget(section_label(label_text, MUTED, 13.5))
     ti = field(hint, default)
     box.add_widget(ti)
     return box, ti
@@ -135,8 +140,8 @@ class CalcScreen(Screen):
         b1, self.rpm_in = labeled_field("RPM", "e.g. 1485", "1485")
         b2, self.s2s_in = labeled_field("Sensor to sensor (mm)", "e.g. 200", "200")
         b3, self.sensor_in = labeled_field("Sensor to coupling (mm)", "e.g. 100", "100")
-        b4, self.cf_in = labeled_field("Sensor to nearest foot - MF1 (mm)", "e.g. 150", "150")
-        b5, self.ff_in = labeled_field("MF1 to MF2 - foot spacing (mm)", "e.g. 300", "300")
+        b4, self.cf_in = labeled_field("Sensor to MF1 (mm)", "e.g. 150", "150")
+        b5, self.ff_in = labeled_field("MF1 to MF2 (mm)", "e.g. 300", "300")
         grid.add_widget(b1); grid.add_widget(b2); grid.add_widget(b3); grid.add_widget(b4); grid.add_widget(b5)
         setup.add_widget(grid)
         col.add_widget(setup)
@@ -148,19 +153,21 @@ class CalcScreen(Screen):
             MUTED))
 
         vert = panel("Vertical plane (side view)")
+        vert.add_widget(body_label("Offset sign: + = remove shim, - = add shim", MUTED))
         vgrid = GridLayout(cols=2, spacing=dp(8), size_hint_y=None)
         vgrid.bind(minimum_height=vgrid.setter("height"))
-        bv1, self.v_off_in = labeled_field("Offset at coupling (mm)\n+ = Remove shim, - = Add shim", "e.g. 0.08")
-        bv2, self.v_ang_in = labeled_field("Angularity (mm / 100mm)", "e.g. 0.02")
+        bv1, self.v_off_in = labeled_field("Offset at coupling (mm)", "e.g. 0.08")
+        bv2, self.v_ang_in = labeled_field("Angularity (mm/100 mm)", "e.g. 0.02")
         vgrid.add_widget(bv1); vgrid.add_widget(bv2)
         vert.add_widget(vgrid)
         col.add_widget(vert)
 
         horiz = panel("Horizontal plane (top view)")
+        horiz.add_widget(body_label("Offset sign: + = move left, - = move right", MUTED))
         hgrid = GridLayout(cols=2, spacing=dp(8), size_hint_y=None)
         hgrid.bind(minimum_height=hgrid.setter("height"))
-        bh1, self.h_off_in = labeled_field("Offset at coupling (mm)\n+ = move Left, - = move Right", "e.g. 0.10")
-        bh2, self.h_ang_in = labeled_field("Angularity (mm / 100mm)", "e.g. 0.04")
+        bh1, self.h_off_in = labeled_field("Offset at coupling (mm)", "e.g. 0.10")
+        bh2, self.h_ang_in = labeled_field("Angularity (mm/100 mm)", "e.g. 0.04")
         hgrid.add_widget(bh1); hgrid.add_widget(bh2)
         horiz.add_widget(hgrid)
         col.add_widget(horiz)
@@ -305,7 +312,7 @@ class GuideScreen(Screen):
             "Widely-cited rule-of-thumb figures by shaft speed. Always prefer OEM or "
             "coupling manufacturer tolerances for critical or high-speed machines.", MUTED))
 
-        header = GridLayout(cols=5, size_hint_y=None, height=dp(30), spacing=dp(4))
+        header = GridLayout(cols=5, size_hint_y=None, height=dp(40), spacing=dp(4))
         for h in ("RPM up to", "Good\noffset", "Good\nang/100mm", "OK\noffset", "OK\nang/100mm"):
             header.add_widget(_fit(Label(text=h, bold=True, font_size=sp(11), color=ACCENT,
                                           halign="center", valign="middle")))
@@ -374,10 +381,21 @@ class RootWidget(BoxLayout):
         self._bg.pos = self.pos
         self._bg.size = self.size
 
+    _bar = None
+    SUBTITLES = {"calc": "Coupling offset & angularity to foot corrections",
+                 "softfoot": "Soft foot check, corner by corner",
+                 "guide": "Tolerance guideline & reference"}
+
+    def bind_bar(self, set_bar):
+        self._bar = set_bar
+        set_bar(None, self.SUBTITLES.get(self.sm.current, ""))
+
     def switch(self, name):
         self.sm.current = name
         for n, btn in self.nav_buttons.items():
             btn.set_active(n == name)
+        if self._bar:
+            self._bar(None, self.SUBTITLES.get(name, ""))
 
     def handle_back(self):
         """Called by main.py on the Android hardware back button. Return

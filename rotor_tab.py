@@ -605,7 +605,10 @@ def note_label(markup_text, height=dp(46)):
         halign="left",
         valign="top",
     )
-    lbl.bind(size=lambda inst, val: setattr(inst, "text_size", val))
+    # wrap to the width and grow to the text, so a note never gets cut off
+    # (or runs into the next widget) on a narrow phone or with larger fonts
+    lbl.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)),
+             texture_size=lambda inst, ts: setattr(inst, "height", max(height, ts[1] + dp(4))))
     return lbl
 
 
@@ -673,6 +676,16 @@ class BalanceApp(App):
         self.header = HeaderBar()
         root.add_widget(self.header)
         root.add_widget(self._build_tab_bar())
+        self._bar = None
+
+        def bind_bar(set_bar):
+            # inside the merged app: drop our blue header, the app's header
+            # bar shows the title and the current tab's subtitle instead
+            self._bar = set_bar
+            if self.header.parent is not None:
+                self.header.parent.remove_widget(self.header)
+            set_bar(None, TAB_SUBTITLES.get(self.sm.current, ""))
+        root.bind_bar = bind_bar
 
         self.sm = ScreenManager(transition=NoTransition())
         self.sm.add_widget(self._make_screen("single", self._build_single_tab()))
@@ -696,10 +709,10 @@ class BalanceApp(App):
     def _build_tab_bar(self):
         """Two rows of pills: 3 on top, 2 below, so labels stay readable
         on a narrow phone screen."""
-        bar = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(92),
+        bar = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(104),
                          padding=[dp(8), dp(6)], spacing=dp(6))
-        row1 = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
-        row2 = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
+        row1 = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+        row2 = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
 
         self.tab_buttons = {}
         specs_row1 = [("single", "Single Plane"), ("two", "Two Plane"), ("trial", "Trial Weight")]
@@ -722,6 +735,8 @@ class BalanceApp(App):
         for key, btn in self.tab_buttons.items():
             btn.set_active(key == name)
         self.header.set_subtitle(TAB_SUBTITLES.get(name, ""))
+        if getattr(self, "_bar", None):
+            self._bar(None, TAB_SUBTITLES.get(name, ""))
 
     # ---------- phase convention (shared) ----------
     def _make_convention_block(self, parent):

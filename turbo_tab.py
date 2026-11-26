@@ -688,9 +688,10 @@ class TurboInsightsScreen(Screen):
         header = BoxLayout(orientation="vertical", size_hint_y=None,
                             padding=[dp(14), dp(14), dp(14), dp(4)], spacing=dp(4))
         header.bind(minimum_height=header.setter("height"))
-        header.add_widget(Label(text="[b]Turbomachinery Insights[/b]", markup=True, color=TEXT,
-                                 size_hint_y=None, height=dp(30), font_size=dp(18),
-                                 halign="left", valign="middle"))
+        self.heading = Label(text="[b]Turbomachinery Insights[/b]", markup=True, color=TEXT,
+                             size_hint_y=None, height=dp(30), font_size=dp(18),
+                             halign="left", valign="middle")
+        header.add_widget(self.heading)
         intro = body_label(
             "A quick-reference for rotordynamics, turbo-specific instabilities, and general "
             "vibration diagnostics - handy for day-to-day fault-finding and for CAT II-style "
@@ -785,8 +786,16 @@ class TurboApp(App):
             pass
         root = BoxLayout(orientation="vertical")
         sm = ScreenManager(transition=NoTransition())
-        sm.add_widget(TurboInsightsScreen(name="turbo_insights"))
+        screen = TurboInsightsScreen(name="turbo_insights")
+        sm.add_widget(screen)
         root.add_widget(sm)
+
+        def bind_bar(set_bar):
+            # the app header already names the tool: drop the repeated title
+            if screen.heading.parent is not None:
+                screen.heading.parent.remove_widget(screen.heading)
+            set_bar(None, "Rotordynamics & turbo fault insights")
+        root.bind_bar = bind_bar
         return root
 
 

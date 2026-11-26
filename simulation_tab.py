@@ -4602,6 +4602,11 @@ class RootWidget(BoxLayout):
         text_col.add_widget(self.subtitle)
         header.add_widget(text_col)
         self.add_widget(header)
+        self.header = header
+        self._bar = None
+        # mirror every title/subtitle change into the app's header bar
+        self.title.bind(text=lambda *a: self._sync_bar())
+        self.subtitle.bind(text=lambda *a: self._sync_bar())
 
         self.sm = ScreenManager(transition=NoTransition())
         self.sm.add_widget(MenuScreen(on_pick=self.open_tool))
@@ -4659,6 +4664,21 @@ class RootWidget(BoxLayout):
         self.subtitle.text = MENU_SUBTITLE
         self.back_btn.opacity = 0
         self.back_btn.disabled = True
+
+    def bind_bar(self, set_bar):
+        """Called by main.py: the app's header bar replaces our pink header
+        (its Back button steps from a sub-tool to this menu, then Home)."""
+        self._bar = set_bar
+        if self.header.parent is not None:
+            self.header.parent.remove_widget(self.header)
+        self._sync_bar()
+
+    def _sync_bar(self):
+        if self._bar:
+            title = self.title.text.replace("[b]", "").replace("[/b]", "")
+            if title != "Simulation":
+                title = "Simulation  >  " + title
+            self._bar(title, self.subtitle.text)
 
     def handle_back(self):
         """Inside a tool, back returns to the menu; from the menu, main.py
