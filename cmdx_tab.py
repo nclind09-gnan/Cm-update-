@@ -63,7 +63,7 @@ TAGS = {
     "v22": "Sideband spacing matches bearing outer-race defect frequency (BPFO)",
     "v23": "Sideband spacing matches bearing inner-race defect frequency (BPFI)",
     "v24": "High-frequency energy concentrated in the 1-20 kHz band",
-    "v21": "Sideband spacing matches the number of gear teeth",
+    "v21": "Peak at gear mesh frequency (number of teeth x shaft speed)",
     "o1": "Elevated iron (Fe) in wear debris",
     "o2": "Elevated copper/lead/tin (bronze or babbitt wear)",
     "o3": "Water content above spec, hazy or milky oil",
@@ -164,9 +164,9 @@ BASE_FAULTS = [
                   "Check suction line for restrictions, air leaks, or blockages.",
                   "Verify suction pressure and NPSH available against pump design."]),
     dict(id="roots-blower", technique="Vibration", name="Roots blower lobe clearance", tags=[],
-         causes=["Excessive clearance between male and female lobes", "Lobe wear from contamination",
+         causes=["Excessive clearance between the two lobed rotors (rotor-to-rotor and rotor-to-casing)", "Lobe wear from contamination",
                  "Timing gear wear affecting lobe synchronization"],
-         actions=["Verify the lobe root clearances for both male and female lobes and correct any deviations."]),
+         actions=["Verify rotor-to-rotor and rotor-to-casing clearances and correct any deviations."]),
     dict(id="pump-flow", technique="Vibration", name="Pump off-design flow / impeller wear", tags=[],
          causes=["Pump operating outside its designed flow/pressure window", "Impeller wear or corrosion",
                  "Excessive clearance between impeller and casing"],
@@ -373,6 +373,9 @@ def zone_range_label(cls, zone):
     return "> %s" % cd
 
 
+EXCLUSIVE_TAGS = [{"v22", "v23"}]
+
+
 def score_faults(selected_tags, technique_filter=None):
     results = []
     for f in FAULTS:
@@ -381,7 +384,15 @@ def score_faults(selected_tags, technique_filter=None):
         matched = [t for t in f["tags"] if t in selected_tags]
         if not matched:
             continue
-        results.append((len(matched) / len(f["tags"]), len(matched), f))
+        # tags that cannot occur together (an outer race defect shows BPFO,
+        # an inner race one BPFI, never both) count once in the denominator,
+        # so a fault listing both alternatives is not capped below 100%
+        total = len(f["tags"])
+        for group in EXCLUSIVE_TAGS:
+            n_in = len(group.intersection(f["tags"]))
+            if n_in > 1:
+                total -= n_in - 1
+        results.append((len(matched) / float(total), len(matched), f))
     results.sort(key=lambda r: (-r[0], -r[1]))
     return results
 
@@ -635,7 +646,7 @@ class SpectrumScreen(Screen):
             zone = get_zone(rms, cls)
             label, color, desc = ZONE_INFO[zone]
             self.results_col.add_widget(body_label(
-                "ISO 20816-3 severity (%s): Zone %s - %s\n%s" % (cls, zone, label, desc), color))
+                "ISO 10816-1 severity (Class %s): Zone %s - %s\n%s" % (cls, zone, label, desc), color))
             self.results_col.add_widget(ColorBar(cls, rms))
 
         results = score_faults(tags, "Vibration")
@@ -960,7 +971,7 @@ class SeverityScreen(Screen):
             self.output.add_widget(ColorBar(cls, rms if hi else None))
 
         self.output.add_widget(body_label(
-            "Figures are general guidance from ISO 10816-3. Confirm against the current "
+            "Figures are general guidance from ISO 10816-1 (Annex B, machine Classes I-IV). Confirm against the current "
             "standard and any OEM limits before run/stop decisions.", MUTED))
 
 
@@ -1174,8 +1185,9 @@ class MenuScreen(Screen):
         col = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(14), size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
 
-        col.add_widget(Label(text="[b]CM/DX[/b]  condition monitoring diagnostics", markup=True,
-                              color=TEXT, size_hint_y=None, height=dp(36)))
+        self.heading = Label(text="[b]CM/DX[/b]  condition monitoring diagnostics", markup=True,
+                             color=TEXT, size_hint_y=None, height=dp(36))
+        col.add_widget(self.heading)
 
         for name, title, subtitle in self.SECTIONS:
             card = NavCard(title, subtitle, AMBER, card_bg=PANEL,
@@ -1195,8 +1207,10 @@ class RootWidget(BoxLayout):
     def __init__(self, **kw):
         super().__init__(orientation="vertical", **kw)
 
+        self._bar = None
         self.sm = ScreenManager(transition=NoTransition())
-        self.sm.add_widget(MenuScreen(on_pick=self.enter))
+        self.menu = MenuScreen(on_pick=self.enter)
+        self.sm.add_widget(self.menu)
         self.sm.add_widget(WizardScreen(name="wizard"))
         self.sm.add_widget(SpectrumScreen(name="spectrum"))
         self.sm.add_widget(LibraryScreen(name="library"))
@@ -1231,13 +1245,31 @@ class RootWidget(BoxLayout):
             self.show_error(traceback.format_exc())
             return
         self.sm.current = screen_name
-        self.subbar.height = dp(46)
-        self.subbar.opacity = 1
+        if self._bar:
+            # the app header shows where you are; its Back returns here
+            title = dict((n, t) for n, t, _ in MenuScreen.SECTIONS).get(screen_name, "CM/DX")
+            self._bar("CM/DX  >  " + title, "")
+        else:
+            self.subbar.height = dp(46)
+            self.subbar.opacity = 1
 
     def go_menu(self):
         self.sm.current = "menu"
         self.subbar.height = 0
         self.subbar.opacity = 0
+        if self._bar:
+            self._bar("CM/DX", "Condition monitoring diagnostics")
+
+    def bind_bar(self, set_bar):
+        """Called by main.py: use the app's header bar instead of our own
+        heading and '< CM/DX Menu' strip."""
+        self._bar = set_bar
+        if self.menu.heading.parent is not None:
+            self.menu.heading.parent.remove_widget(self.menu.heading)
+        if self.sm.current == "menu":
+            self.go_menu()
+        else:
+            self.enter(self.sm.current)
 
     def handle_back(self):
         """Called by main.py on the Android hardware back button. Return

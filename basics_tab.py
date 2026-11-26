@@ -765,9 +765,10 @@ BASICS_TOPICS = [
             "actually 2-D motion - an orbit is what fills in the missing dimension."),
         sub("Phase Lag vs. Phase Lead",
             "Phase can be measured against the direction of shaft rotation or with it, and the two "
-            "conventions give answers 360 degrees apart from each other.",
-            "Getting the convention wrong in a balancing job typically puts the correction weight "
-            "roughly opposite where it should go, making the vibration worse instead of better. "
+            "conventions give mirror-image answers (lead = 360 degrees minus lag).",
+            "Getting the convention wrong in a balancing job mirrors the correction angle about the "
+            "reference mark (an angle of theta becomes 360 minus theta), so the weight lands out of "
+            "place by twice the angle and the vibration can get worse instead of better. "
             "This is one of the most consequential conventions to get right in practical vibration "
             "work.",
             "Phase lag measures the angle opposite to the direction of shaft rotation - the "
@@ -2618,8 +2619,9 @@ BASICS_TOPICS = [
                 "The coefficient's angle includes the machine's lag angle automatically.",
                 "A very small effect vector means the trial weight was inadequate - repeat with more.",
             ],
-            "Keep the trial weight in place while calculating - the correction is computed relative "
-            "to the current state, and removing it changes the situation."),
+            "The correction worked out from the ORIGINAL vector assumes the trial weight comes off "
+            "before the correction goes on. If you leave the trial weight on, work the correction "
+            "from the trial-run vector instead, or add the two weights as vectors."),
         sub("Step 4: Calculating the Correction Weight",
             "Divide the original vibration vector by the influence coefficient, then reverse the "
             "direction, to get the weight and angle needed.",
@@ -2699,8 +2701,8 @@ BASICS_TOPICS = [
                 "A result that gets worse indicates a calculation error, a wrong phase convention, or a misdiagnosis.",
             ],
             "If the first correction makes vibration worse rather than better, check your phase "
-            "convention first - a lag/lead mix-up is the most common cause and puts the weight "
-            "roughly 180 degrees out."),
+            "convention first - a lag/lead mix-up is the most common cause: it mirrors the "
+            "correction angle about the reference mark, an error of twice that angle."),
     ]),
 
     dict(name="Two-Plane Balancing", category="Balancing", subtopics=[
@@ -3463,6 +3465,7 @@ class SubtopicListScreen(Screen):
         self.title_lbl = Label(text="", bold=True, font_size=sp(16), color=TEXT)
         bar.add_widget(self.title_lbl)
         root.add_widget(bar)
+        self.bar = bar
 
         self.scroll = ScrollView()
         self.col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(14), size_hint_y=None)
@@ -3500,9 +3503,10 @@ class TopicListScreen(Screen):
         col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(14), size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
 
-        col.add_widget(Label(text="[b]Vibration Basics[/b]", markup=True, color=TEXT,
-                              size_hint_y=None, height=dp(30), font_size=dp(18),
-                              halign="left", valign="middle"))
+        self.heading = Label(text="[b]Vibration Basics[/b]", markup=True, color=TEXT,
+                             size_hint_y=None, height=dp(30), font_size=dp(18),
+                             halign="left", valign="middle")
+        col.add_widget(self.heading)
         intro = body_label(
             "The foundational concepts the rest of the app builds on. Tap a topic to see its "
             "sub-topics.")
@@ -3542,14 +3546,33 @@ class RootWidget(BoxLayout):
         self.sm.add_widget(self.sub_screen)
         self.add_widget(self.sm)
 
+    _bar = None
+
+    def bind_bar(self, set_bar):
+        """Called by main.py: the app header shows the title and its Back
+        button steps out of a topic, so our own title and the topic screen's
+        '< Back' strip are dropped."""
+        self._bar = set_bar
+        h = self.topics_screen.heading
+        if h.parent is not None:
+            h.parent.remove_widget(h)
+        b = self.sub_screen.bar
+        if b.parent is not None:
+            b.parent.remove_widget(b)
+        set_bar("Vibration Basics", "Foundational vibration-analysis concepts")
+
     def open_topic(self, topic):
         self.sm.transition.direction = "left"
         self.sub_screen.populate(topic, self.open_subtopic_popup)
         self.sm.current = "basics_subtopics"
+        if self._bar:
+            self._bar("Basics  >  " + topic["name"], "%d sub-topics" % len(topic["subtopics"]))
 
     def go_back_to_topics(self):
         self.sm.transition.direction = "right"
         self.sm.current = "basics_topics"
+        if self._bar:
+            self._bar("Vibration Basics", "Foundational vibration-analysis concepts")
 
     def open_subtopic_popup(self, subtopic):
         content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))

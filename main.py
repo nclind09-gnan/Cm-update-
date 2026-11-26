@@ -88,29 +88,31 @@ class HomeScreen(Screen):
             self._bg = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._redraw, size=self._redraw)
 
-        root = BoxLayout(orientation="vertical", padding=[dp(22), dp(48), dp(22), dp(20)], spacing=dp(22))
+        root = BoxLayout(orientation="vertical", padding=[dp(20), dp(36), dp(20), dp(8)], spacing=dp(16))
 
         header = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(66), spacing=dp(4))
-        header.add_widget(Label(text="CM Toolkit", bold=True, font_size=sp(30), color=WHITE,
-                                 halign="left", valign="bottom", size_hint_y=None, height=dp(40)))
+        header.add_widget(_fit_label(Label(text="CM Toolkit", bold=True, font_size=sp(30), color=WHITE,
+                                            halign="left", valign="bottom", size_hint_y=None, height=dp(40))))
         header.add_widget(_fit_label(Label(text="Condition Monitoring Suite", font_size=sp(14),
                                             color=MUTED, halign="left", valign="top",
                                             size_hint_y=None, height=dp(20))))
         root.add_widget(header)
 
-        cards = BoxLayout(orientation="vertical", spacing=dp(14), size_hint_y=None)
+        # the cards scroll, so all seven stay reachable on a short phone screen
+        scroll = ScrollView(do_scroll_x=False, bar_width=dp(3))
+        cards = BoxLayout(orientation="vertical", spacing=dp(12), size_hint_y=None,
+                          padding=[0, 0, 0, dp(8)])
         cards.bind(minimum_height=cards.setter("height"))
         for name, title, subtitle, accent in CARD_SPECS:
             card = NavCard(title, subtitle, accent, card_bg=CARD_BG,
-                           title_color=WHITE, subtitle_color=MUTED, height=dp(96))
+                           title_color=WHITE, subtitle_color=MUTED, height=dp(84))
             card.bind(on_release=lambda inst, n=name: on_pick(n))
             cards.add_widget(card)
-        root.add_widget(cards)
-
-        root.add_widget(Widget())  # spacer pushes footer down
+        scroll.add_widget(cards)
+        root.add_widget(scroll)
 
         root.add_widget(Label(text="Built by Gnaneswar", font_size=sp(12), color=MUTED,
-                               size_hint_y=None, height=dp(28)))
+                               size_hint_y=None, height=dp(26)))
 
         self.add_widget(root)
 
@@ -160,27 +162,62 @@ def _safe_build(build_fn, label):
         return box
 
 
+class ToolBar(BoxLayout):
+    """The one header bar every tool shows: a large Back button, the tool's
+    title and an optional subtitle. A tool can change the title/subtitle as
+    you move around inside it (see bind_bar in each tool), so tools no
+    longer need a second header of their own."""
+
+    def __init__(self, name, on_back, **kwargs):
+        super().__init__(size_hint_y=None, height=dp(60), padding=[dp(4), dp(6), dp(12), dp(6)],
+                         spacing=dp(6), **kwargs)
+        accent = _accent(name)
+        with self.canvas.before:
+            Color(*accent)
+            self._bg = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=lambda w, v: setattr(self._bg, "pos", v),
+                  size=lambda w, v: setattr(self._bg, "size", v))
+
+        back = Button(text="<  Back", bold=True, font_size=sp(16), size_hint_x=None, width=dp(96),
+                      background_normal="", background_down="", background_color=(0, 0, 0, 0.12),
+                      color=WHITE)
+        back.bind(on_release=lambda *a: on_back())
+        self.add_widget(back)
+
+        col = BoxLayout(orientation="vertical", padding=[dp(6), 0, 0, 0])
+        self.title_lbl = _fit_label(Label(text=TOOL_TITLES[name], bold=True, font_size=sp(18),
+                                          color=WHITE, halign="left", valign="middle",
+                                          shorten=True, shorten_from="right"))
+        self.sub_lbl = _fit_label(Label(text="", font_size=sp(12.5), color=(1, 1, 1, 0.85),
+                                        halign="left", valign="top", size_hint_y=None, height=0,
+                                        shorten=True, shorten_from="right"))
+        col.add_widget(self.title_lbl)
+        col.add_widget(self.sub_lbl)
+        self.add_widget(col)
+
+    def set(self, title=None, subtitle=None):
+        if title is not None:
+            self.title_lbl.text = title
+        if subtitle is not None:
+            self.sub_lbl.text = subtitle
+            self.sub_lbl.height = dp(18) if subtitle else 0
+
+
 def _tool_screen(name, root_widget, on_back):
-    """Wrap a tool's root widget with a slim back bar and its own Screen."""
-    accent = next(a for n, _, _, a in CARD_SPECS if n == name)
+    """Wrap a tool's root widget with the header bar and its own Screen."""
     screen = Screen(name=name)
     wrapper = BoxLayout(orientation="vertical")
-
-    bar = BoxLayout(size_hint_y=None, height=dp(50), padding=[dp(4), dp(4)], spacing=dp(8))
-    with bar.canvas.before:
-        Color(*accent)
-        bar_bg = Rectangle(pos=bar.pos, size=bar.size)
-    bar.bind(pos=lambda w, v: setattr(bar_bg, "pos", v), size=lambda w, v: setattr(bar_bg, "size", v))
-
-    back_btn = Button(text="< Back", bold=True, size_hint_x=None, width=dp(96),
-                       background_normal="", background_color=(0, 0, 0, 0), color=WHITE)
-    back_btn.bind(on_release=lambda *a: on_back())
-    bar.add_widget(back_btn)
-    bar.add_widget(_fit_label(Label(text=TOOL_TITLES[name], bold=True, font_size=sp(17), color=WHITE,
-                                     halign="left", valign="middle")))
+    bar = ToolBar(name, on_back)
     wrapper.add_widget(bar)
     wrapper.add_widget(root_widget)
     screen.add_widget(wrapper)
+    # tools that know about the bar hide their own header and drive this one
+    hook = getattr(root_widget, "bind_bar", None)
+    if callable(hook):
+        try:
+            hook(bar.set)
+        except Exception:
+            traceback.print_exc()
     return screen
 
 
@@ -215,7 +252,27 @@ class CMToolkitApp(App):
 
         root = _safe_build(make, label)
         self.tool_roots[name] = root
-        self.sm.add_widget(_tool_screen(name, root, on_back=lambda: self.switch("home")))
+        self.sm.add_widget(_tool_screen(name, root, on_back=self.go_back))
+
+    def go_back(self):
+        """One step back: inside a tool, its own back first (e.g. from a
+        section to that tool's menu); otherwise to Home. Used by both the
+        Back button in the header and the phone's back button."""
+        cur = self.sm.current
+        if cur == "home":
+            return False
+        if cur == "loading":
+            self.switch("home")
+            return True
+        tool = self.tool_roots.get(cur)
+        if tool is not None and hasattr(tool, "handle_back"):
+            try:
+                if tool.handle_back():
+                    return True
+            except Exception:
+                traceback.print_exc()
+        self.switch("home")
+        return True
 
     def _on_keyboard(self, window, key, *args):
         """Intercept the Android hardware/gesture back button (keycode 27).
@@ -226,16 +283,7 @@ class CMToolkitApp(App):
         the app normally."""
         if key != 27:
             return False
-        if self.sm.current == "home":
-            return False
-        if self.sm.current == "loading":
-            self.switch("home")
-            return True
-        tool = self.tool_roots.get(self.sm.current)
-        if tool is not None and hasattr(tool, "handle_back") and tool.handle_back():
-            return True
-        self.switch("home")
-        return True
+        return self.go_back()
 
     def switch(self, name):
         if name != "home" and name not in self.tool_roots:

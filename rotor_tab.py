@@ -8,8 +8,10 @@ Five sub-tabs:
   4. Weight Split   - resolve one correction onto two fixed positions
   5. Trim Balance   - reuse a known sensitivity, no new trial run
 
-Angle convention: measured CLOCKWISE from the phase reference mark
-(keyphasor), as viewed from the sensor end.
+Angle convention: weight positions are counted from the phase reference
+mark (keyphasor) AGAINST the direction of rotation - the same direction phase
+lag is counted - so the vector maths holds whichever way the shaft turns.
+(Lead readings are converted to lag first by the Phase Lead option.)
 """
 
 import cmath
@@ -605,7 +607,10 @@ def note_label(markup_text, height=dp(46)):
         halign="left",
         valign="top",
     )
-    lbl.bind(size=lambda inst, val: setattr(inst, "text_size", val))
+    # wrap to the width and grow to the text, so a note never gets cut off
+    # (or runs into the next widget) on a narrow phone or with larger fonts
+    lbl.bind(width=lambda inst, w: setattr(inst, "text_size", (w, None)),
+             texture_size=lambda inst, ts: setattr(inst, "height", max(height, ts[1] + dp(4))))
     return lbl
 
 
@@ -673,6 +678,16 @@ class BalanceApp(App):
         self.header = HeaderBar()
         root.add_widget(self.header)
         root.add_widget(self._build_tab_bar())
+        self._bar = None
+
+        def bind_bar(set_bar):
+            # inside the merged app: drop our blue header, the app's header
+            # bar shows the title and the current tab's subtitle instead
+            self._bar = set_bar
+            if self.header.parent is not None:
+                self.header.parent.remove_widget(self.header)
+            set_bar(None, TAB_SUBTITLES.get(self.sm.current, ""))
+        root.bind_bar = bind_bar
 
         self.sm = ScreenManager(transition=NoTransition())
         self.sm.add_widget(self._make_screen("single", self._build_single_tab()))
@@ -696,10 +711,10 @@ class BalanceApp(App):
     def _build_tab_bar(self):
         """Two rows of pills: 3 on top, 2 below, so labels stay readable
         on a narrow phone screen."""
-        bar = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(92),
+        bar = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(104),
                          padding=[dp(8), dp(6)], spacing=dp(6))
-        row1 = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
-        row2 = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
+        row1 = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+        row2 = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
 
         self.tab_buttons = {}
         specs_row1 = [("single", "Single Plane"), ("two", "Two Plane"), ("trial", "Trial Weight")]
@@ -722,6 +737,8 @@ class BalanceApp(App):
         for key, btn in self.tab_buttons.items():
             btn.set_active(key == name)
         self.header.set_subtitle(TAB_SUBTITLES.get(name, ""))
+        if getattr(self, "_bar", None):
+            self._bar(None, TAB_SUBTITLES.get(name, ""))
 
     # ---------- phase convention (shared) ----------
     def _make_convention_block(self, parent):
@@ -798,8 +815,9 @@ class BalanceApp(App):
         scroll, form = scroll_form()
 
         form.add_widget(note_label(
-            f"[color={MUTED_HEX}][size=14]Angles measured clockwise from the "
-            "phase reference mark, as viewed from the sensor end.[/size][/color]"))
+            f"[color={MUTED_HEX}][size=14]Weight angles are counted from the phase "
+            "reference mark AGAINST the direction of rotation (the way phase lag is "
+            "counted), whichever way the shaft turns.[/size][/color]"))
 
         panel = Panel(size_hint_y=None)
         panel.bind(minimum_height=panel.setter("height"))
@@ -900,11 +918,11 @@ class BalanceApp(App):
 
         if self.single_trial_removed:
             action = ("Remove the trial weight, then install the correction weight\n"
-                      "at the stated angle (clockwise from the reference mark).")
+                      "at the stated angle (from the reference mark, against rotation).")
             headline = f"CORRECTION WEIGHT: {wc_mag:.2f} @ {wc_ang:.1f}\u00b0"
         else:
             action = ("Leave the trial weight where it is and add the extra weight\n"
-                      "shown above at the stated angle (clockwise from the reference mark).")
+                      "shown above at the stated angle (from the reference mark, against rotation).")
             headline = f"ADD: {add_mag:.2f} @ {add_ang:.1f}\u00b0"
 
         self.last_sensitivity = (s_mag, s_ang)
@@ -1308,9 +1326,11 @@ class BalanceApp(App):
                     f"[color={ERROR_HEX}]Enter the number of positions and the offset.[/color]")
                 return
             n = int(round(count))
-            if n < 2:
+            if n < 3:
+                # two equally spaced positions are 180 deg apart: they cannot
+                # make a weight at any other angle
                 self.sp_result.text = (
-                    f"[color={ERROR_HEX}]There must be at least 2 positions.[/color]")
+                    f"[color={ERROR_HEX}]There must be at least 3 equally spaced positions.[/color]")
                 return
             if n > 360:
                 self.sp_result.text = (

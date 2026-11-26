@@ -3,7 +3,7 @@ Bearing Defect Frequency Scope — mobile app (Kivy)
 Built by Gnaneswar
 
 Catalog search across 18 manufacturers / 14,535 bearings, a custom-geometry
-calculator, and an ISO 10816-3 vibration severity reference — all offline,
+calculator, and an ISO 10816-1 (Class I-IV) vibration severity reference — all offline,
 no internet needed once installed.
 """
 
@@ -129,7 +129,7 @@ class SpectrumWidget(Widget):
         self.peaks = []       # list of (label, order, value_text, color)
         self.max_order = 12
         self.size_hint_y = None
-        self.height = dp(190)
+        self.height = dp(210)
         self.bind(pos=self.redraw, size=self.redraw)
 
     def set_peaks(self, peaks, max_order):
@@ -143,7 +143,7 @@ class SpectrumWidget(Widget):
             Color(*WHITE)
             Rectangle(pos=self.pos, size=self.size)
 
-            pad_l, pad_r, pad_t, pad_b = dp(10), dp(10), dp(28), dp(46)
+            pad_l, pad_r, pad_t, pad_b = dp(10), dp(10), dp(34), dp(62)
             plot_x = self.x + pad_l
             plot_w = self.width - pad_l - pad_r
             plot_y = self.y + pad_b
@@ -168,14 +168,14 @@ class SpectrumWidget(Widget):
                 if order is None:
                     continue
                 x = xfor(order)
-                h = plot_h * 0.68
+                h = plot_h * 0.62
                 Color(*color)
                 Line(points=[x, plot_y, x, plot_y + h], width=2.6)
 
         # text labels drawn as child Labels (canvas text is painful in Kivy)
         for child in list(self.children):
             self.remove_widget(child)
-        pad_l, pad_r, pad_t, pad_b = dp(10), dp(10), dp(28), dp(46)
+        pad_l, pad_r, pad_t, pad_b = dp(10), dp(10), dp(34), dp(62)
         plot_x = self.x + pad_l
         plot_w = self.width - pad_l - pad_r
         plot_y = self.y + pad_b
@@ -186,19 +186,37 @@ class SpectrumWidget(Widget):
         def xfor(order):
             return plot_x + (order / self.max_order) * plot_w
 
+        # Close frequencies (e.g. BSF and BPFO) would print their names and
+        # values on top of each other: give each label the first row where
+        # it clears every label already placed in that row.
+        def place(items, gap):
+            rows = []                     # rows[r] = list of x centres used
+            out = {}
+            for i, x in sorted(items, key=lambda it: it[1]):
+                r = 0
+                while r < len(rows) and any(abs(x - px) < gap for px in rows[r]):
+                    r += 1
+                if r == len(rows):
+                    rows.append([])
+                rows[r].append(x)
+                out[i] = r
+            return out
+
+        live = [(i, xfor(p[1])) for i, p in enumerate(self.peaks) if p[1] is not None]
+        name_row = place(live, dp(44))
+        val_row = place(live, dp(56))
         for i, (label, order, value_text, color) in enumerate(self.peaks):
             if order is None:
                 continue
             x = xfor(order)
-            h = plot_h * 0.68
-            name_lbl = Label(text=label, color=color, bold=True, font_size=sp(14),
-                              size_hint=(None, None), size=(dp(70), dp(18)),
-                              pos=(x - dp(35), plot_y + h + dp(2)))
+            h = plot_h * 0.62
+            name_lbl = Label(text=label, color=color, bold=True, font_size=sp(13),
+                              size_hint=(None, None), size=(dp(60), dp(16)),
+                              pos=(x - dp(30), plot_y + h + dp(2) + name_row[i] * dp(15)))
             self.add_widget(name_lbl)
-            row_offset = dp(16) if i % 2 else 0
             val_lbl = Label(text=value_text, color=color, bold=True, font_size=sp(12),
                              size_hint=(None, None), size=(dp(70), dp(16)),
-                             pos=(x - dp(35), plot_y - dp(18) - row_offset))
+                             pos=(x - dp(35), plot_y - dp(18) - min(val_row[i], 2) * dp(15)))
             self.add_widget(val_lbl)
 
         one_x = xfor(1)
@@ -223,7 +241,8 @@ class CatalogTab(BoxLayout):
         self.brand_spinner = Spinner(
             text="All brands",
             values=["All brands"] + sorted(DATA["data"].keys()),
-            size_hint_y=None, height=dp(44), font_size=sp(15),
+            size_hint_y=None, height=dp(48), font_size=sp(15),
+            background_normal="", background_color=BLUE_BG, color=TEXT, bold=True,
         )
         self.brand_spinner.bind(text=lambda *_: self.do_search())
         card.add_widget(self.brand_spinner)
@@ -276,7 +295,9 @@ class CatalogTab(BoxLayout):
         self.app.set_selection({
             "source": "catalog",
             "brand": brand, "model": row[0],
-            "BPFO": row[1], "BPFI": row[2], "BSF": row[3], "FTF": row[4],
+            # catalogue rows are [model, BPFI, BPFO, BSF, FTF, balls]:
+            # inner-race pass rate is always the higher of the two
+            "BPFI": row[1], "BPFO": row[2], "BSF": row[3], "FTF": row[4],
         })
 
 
@@ -429,6 +450,7 @@ class RootUI(BoxLayout):
                                  font_size=sp(19), size_hint_y=None, height=dp(28), halign="left",
                                  text_size=(Window.width - dp(28), None)))
         self.add_widget(header)
+        self._header = header
 
         # shaft speed (shared across tabs)
         speed_card = Card(orientation="horizontal", padding=dp(12), spacing=dp(10),
@@ -589,6 +611,13 @@ class RootUI(BoxLayout):
         else:
             self.body.add_widget(self.severity_tab)
 
+    def bind_bar(self, set_bar):
+        """Called by main.py: the app's header bar carries the title, so our
+        own two-line heading is dropped to give the content more room."""
+        if self._header.parent is not None:
+            self._header.parent.remove_widget(self._header)
+        set_bar(None, "Bearing defect frequency scope")
+
     def handle_back(self):
         """Called by main.py on the Android hardware back button. Return
         True if handled internally, False to let main.py return to Home."""
@@ -668,7 +697,7 @@ class BearingScopeApp(App):
         if default_row:
             self.set_selection({
                 "source": "catalog", "brand": "SKF", "model": default_row[0],
-                "BPFO": default_row[1], "BPFI": default_row[2],
+                "BPFI": default_row[1], "BPFO": default_row[2],
                 "BSF": default_row[3], "FTF": default_row[4],
             })
         return self.ui

@@ -294,7 +294,7 @@ TURBO_TOPICS = [
              "The probe should sit near the middle of its linear range, and two probes on the same plane should be matched in sensitivity.",
              "Casing-mounted accelerometers still have a role (showing how the housing itself moves relative to ground) but the oil film attenuates shaft motion, limiting what they reveal about the shaft directly.",
          ],
-         tip="Two probes mounted 90 degrees apart (typically X horizontal, Y vertical) are what make orbit and "
+         tip="Two probes mounted 90 degrees apart (per API 670 usually 45 deg either side of vertical: Y left, X right, viewed from the driver) are what make orbit and "
              "centerline analysis possible - a single probe only gives you gap in one direction."),
 
     dict(name="Shaft Centerline Plots & Eccentricity Ratio",
@@ -381,7 +381,7 @@ TURBO_TOPICS = [
              "Bode and Polar plots use the same underlying vector data; Bode separates amplitude and phase onto two axes, Polar combines them into one spiral.",
              "Both are especially useful for finding the slow-roll vector, resonance speeds, synchronous amplification factor, heavy-spot location, and rotor mode shape during a startup or coastdown.",
              "A Cascade (or waterfall) plot stacks spectra over a speed or time range, with frequency on one axis and speed/time on the other - useful for watching how various orders (1X, 2X, oil whirl, blade-pass, etc.) shift and interact.",
-             "A Full Spectrum version of a cascade (built from two orthogonal probes together) separates forward from reverse-precessing components - handy for confirming whether a subsynchronous peak is whirl-like (reverse) or resonance-like (forward).",
+             "A Full Spectrum version of a cascade (built from two orthogonal probes together) separates forward from reverse-precessing components - handy for confirming that a subsynchronous peak is forward-precessing, as oil whirl and whip are; a strong reverse component points elsewhere, e.g. rub or very anisotropic supports.",
              "A Campbell diagram is the design-side counterpart: it plots a rotor's natural frequencies against speed together with excitation lines (1X, blade-pass, oil-whirl band, gear mesh, etc.) to check for crossings that would need to be avoided.",
          ],
          tip="If a resonance crossing looks marginal on a Bode plot, check the corresponding Cascade or Full "
@@ -688,9 +688,10 @@ class TurboInsightsScreen(Screen):
         header = BoxLayout(orientation="vertical", size_hint_y=None,
                             padding=[dp(14), dp(14), dp(14), dp(4)], spacing=dp(4))
         header.bind(minimum_height=header.setter("height"))
-        header.add_widget(Label(text="[b]Turbomachinery Insights[/b]", markup=True, color=TEXT,
-                                 size_hint_y=None, height=dp(30), font_size=dp(18),
-                                 halign="left", valign="middle"))
+        self.heading = Label(text="[b]Turbomachinery Insights[/b]", markup=True, color=TEXT,
+                             size_hint_y=None, height=dp(30), font_size=dp(18),
+                             halign="left", valign="middle")
+        header.add_widget(self.heading)
         intro = body_label(
             "A quick-reference for rotordynamics, turbo-specific instabilities, and general "
             "vibration diagnostics - handy for day-to-day fault-finding and for CAT II-style "
@@ -785,8 +786,16 @@ class TurboApp(App):
             pass
         root = BoxLayout(orientation="vertical")
         sm = ScreenManager(transition=NoTransition())
-        sm.add_widget(TurboInsightsScreen(name="turbo_insights"))
+        screen = TurboInsightsScreen(name="turbo_insights")
+        sm.add_widget(screen)
         root.add_widget(sm)
+
+        def bind_bar(set_bar):
+            # the app header already names the tool: drop the repeated title
+            if screen.heading.parent is not None:
+                screen.heading.parent.remove_widget(screen.heading)
+            set_bar(None, "Rotordynamics & turbo fault insights")
+        root.bind_bar = bind_bar
         return root
 
 

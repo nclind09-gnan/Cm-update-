@@ -4241,7 +4241,7 @@ class WaveformScreen(_ToolScreen):
             "spectrum takes it apart again into the same five lines, at the same heights.\n\n"
             "[b]Peaks add, RMS does not.[/b] If all five peaks happened to line up the peak would be the sum of "
             "the amplitudes, but the RMS is the square root of the sum of squares. That gap is why the crest "
-            "factor of a complex waveform is above 1.41.\n\n"
+            "factor of a complex waveform is usually above 1.41.\n\n"
             "[b]Two close frequencies[/b] (try the Beat preset) make the merged waveform swell and fade. The "
             "spectrum shows two lines only if the lines of resolution can split them.\n\n"
             "[b]Wave frequency 0 Hz[/b] is a constant offset (DC), which most vibration instruments filter out.")
@@ -4602,6 +4602,11 @@ class RootWidget(BoxLayout):
         text_col.add_widget(self.subtitle)
         header.add_widget(text_col)
         self.add_widget(header)
+        self.header = header
+        self._bar = None
+        # mirror every title/subtitle change into the app's header bar
+        self.title.bind(text=lambda *a: self._sync_bar())
+        self.subtitle.bind(text=lambda *a: self._sync_bar())
 
         self.sm = ScreenManager(transition=NoTransition())
         self.sm.add_widget(MenuScreen(on_pick=self.open_tool))
@@ -4659,6 +4664,21 @@ class RootWidget(BoxLayout):
         self.subtitle.text = MENU_SUBTITLE
         self.back_btn.opacity = 0
         self.back_btn.disabled = True
+
+    def bind_bar(self, set_bar):
+        """Called by main.py: the app's header bar replaces our pink header
+        (its Back button steps from a sub-tool to this menu, then Home)."""
+        self._bar = set_bar
+        if self.header.parent is not None:
+            self.header.parent.remove_widget(self.header)
+        self._sync_bar()
+
+    def _sync_bar(self):
+        if self._bar:
+            title = self.title.text.replace("[b]", "").replace("[/b]", "")
+            if title != "Simulation":
+                title = "Simulation  >  " + title
+            self._bar(title, self.subtitle.text)
 
     def handle_back(self):
         """Inside a tool, back returns to the menu; from the menu, main.py

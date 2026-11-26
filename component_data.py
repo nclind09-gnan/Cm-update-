@@ -105,10 +105,10 @@ COMPONENTS = [
              actions=["Schedule bearing replacement soon.",
                       "Confirm with time waveform impacts and BPFI frequency calculation."]),
         dict(name="Stage 3 fault - ball/roller damage",
-             signature="Non-synchronous harmonics with FTF (cage) sidebands around 0.4x-0.46x running speed.",
+             signature="Harmonics of BSF (ball spin frequency, 2xBSF often strongest) with sidebands at FTF (cage, about 0.4X).",
              causes=["Spalling/pitting damage on one or more rolling elements"],
              actions=["Schedule bearing replacement soon.",
-                      "Confirm with time waveform impacts and FTF (cage) frequency calculation."]),
+                      "Confirm with time waveform impacts and BSF calculation; the sideband spacing is FTF."]),
         dict(name="Stage 4 fault (advanced damage)",
              signature="Classic bearing harmonics/sidebands disappear into a raised, noisy floor "
                         "('haystacks'); 1X harmonics appear as internal clearance grows.",
@@ -300,11 +300,11 @@ COMPONENTS = [
                       "If the flow is within specifications, inspect the pump impeller for signs of corrosion.",
                       "Measure the air gaps between the impeller and the casing to ensure proper clearances."]),
         dict(name="Roots blower lobe clearance",
-             signature="Elevated vibration at lobe-pass frequency (number of lobes x shaft speed) "
+             signature="Elevated vibration at lobe-pass frequency (lobes on both rotors x shaft speed, e.g. 4X for a two-lobe blower) "
                         "with a growing noise floor as clearance increases.",
-             causes=["Excessive clearance between male and female lobes", "Lobe wear from contamination",
+             causes=["Excessive clearance between the two lobed rotors (rotor-to-rotor and rotor-to-casing)", "Lobe wear from contamination",
                       "Timing gear wear affecting lobe synchronization"],
-             actions=["Verify the lobe root clearances for both male and female lobes and correct any deviations.",
+             actions=["Verify rotor-to-rotor and rotor-to-casing clearances and correct any deviations.",
                       "Check timing gear condition if lobe synchronization is suspect."]),
     ]),
 

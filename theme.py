@@ -17,12 +17,12 @@ class RoundedButton(ButtonBehavior, BoxLayout):
     """A full-width rounded action button (e.g. Calculate/Diagnose/Check)."""
 
     def __init__(self, text, accent, text_color=(1, 1, 1, 1), height=None, **kwargs):
-        super().__init__(size_hint_y=None, height=(height or dp(48)), **kwargs)
+        super().__init__(size_hint_y=None, height=max(height or dp(50), dp(44)), **kwargs)
         with self.canvas.before:
             self._color = Color(*accent)
             self._rect = RoundedRectangle(radius=[dp(12)])
         self.bind(pos=self._redraw, size=self._redraw)
-        self.label = Label(text=text, bold=True, font_size=sp(15), color=text_color)
+        self.label = Label(text=text, bold=True, font_size=sp(16), color=text_color)
         self.add_widget(self.label)
 
     def _redraw(self, *a):
@@ -47,20 +47,32 @@ class NavCard(ButtonBehavior, BoxLayout):
             self._accent = RoundedRectangle(radius=[dp(3)])
         self.bind(pos=self._redraw, size=self._redraw)
 
-        text_col = BoxLayout(orientation="vertical", spacing=dp(2))
-        title_lbl = Label(text=title, bold=True, font_size=sp(17), color=title_color,
+        self._base_height = height or dp(84)
+        text_col = BoxLayout(orientation="vertical", spacing=dp(3))
+        title_lbl = Label(text=title, bold=True, font_size=sp(18), color=title_color,
                            halign="left", valign="bottom", size_hint_y=None, height=dp(24))
         title_lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
-        sub_lbl = Label(text=subtitle, font_size=sp(12), color=subtitle_color,
-                         halign="left", valign="top")
+        sub_lbl = Label(text=subtitle, font_size=sp(13), color=subtitle_color,
+                         halign="left", valign="top", size_hint_y=None)
         sub_lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
-        text_col.add_widget(title_lbl)
+        # grow the card when a long title or subtitle wraps, instead of
+        # letting the lines run over each other
+        title_lbl.bind(texture_size=lambda w, ts: (setattr(w, "height", max(dp(24), ts[1])), self._fit()))
+        sub_lbl.bind(texture_size=lambda w, ts: (setattr(w, "height", ts[1]), self._fit()))
+        self._title_lbl, self._sub_lbl = title_lbl, sub_lbl
+        text_col.add_widget(BoxLayout())          # spare height is split above
+        text_col.add_widget(title_lbl)            # and below, centring the text
         text_col.add_widget(sub_lbl)
+        text_col.add_widget(BoxLayout())
         self.add_widget(text_col)
 
         chevron = Label(text=">", bold=True, font_size=sp(22), color=accent,
                          size_hint_x=None, width=dp(20))
         self.add_widget(chevron)
+
+    def _fit(self, *a):
+        need = dp(24) + self._title_lbl.height + dp(9) + self._sub_lbl.height
+        self.height = max(self._base_height, need)
 
     def _redraw(self, *a):
         self._bg.pos = self.pos
@@ -85,7 +97,10 @@ class PillButton(ButtonBehavior, BoxLayout):
             self._color = Color(*inactive)
             self._rect = RoundedRectangle(radius=[dp(12)])
         self.bind(pos=self._redraw, size=self._redraw)
-        self.label = Label(text=text, bold=True, font_size=sp(13), color=self.inactive_text_color)
+        self.label = Label(text=text, bold=True, font_size=sp(14), color=self.inactive_text_color,
+                           halign="center", valign="middle")
+        # long labels wrap inside the pill instead of spilling over its edges
+        self.label.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
         self.add_widget(self.label)
 
     def _redraw(self, *a):
@@ -97,7 +112,7 @@ class PillButton(ButtonBehavior, BoxLayout):
         self.label.color = self.active_text_color if active else self.inactive_text_color
 
 
-def build_pill_tab_bar(specs, on_switch, height=46, spacing=dp(6), padding=dp(4)):
+def build_pill_tab_bar(specs, on_switch, height=dp(52), spacing=dp(6), padding=dp(6)):
     """specs: list of (name, label, accent) tuples.
     Returns (bar_widget, buttons_dict) - buttons_dict maps name -> PillButton
     so the caller can call set_active on the right ones after a switch."""
