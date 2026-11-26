@@ -225,6 +225,13 @@ def iso_zone(rms, g):
 # Each build(c) returns:
 #   comps    [(hz, v)]              discrete lines, v = velocity mm/s peak
 #   impacts  [(rate, fr, accG, q)]  repetitive impacting that rings a resonance
+#   am       [(fc, v, rate, depth, width)]  a carrier (mm/s peak) whose amplitude
+#            is modulated at `rate`: width None = smooth 1 + depth cos, width w =
+#            a short burst once per period, w = burst sigma as a fraction of the
+#            period. Built in the time domain, so the sidebands it produces
+#            are phase locked to the carrier the way a real gear or rotor bar
+#            makes them, and the waveform shows the modulation. Separate lines
+#            with random phases would add up to noise instead.
 #   rand     [(lo, hi, accG, velMM, flat)]  band limited random content
 #   clip     fraction of peak displacement at which the motion truncates
 #   marks    [(hz, label)]          what to annotate on the spectrum
@@ -384,28 +391,28 @@ def _f_gear(c):
     s, f1, fr = c["s"], c["f1"], c["fr"]
     gmf = c["teeth"] * f1
     comps = [(f1, 1.0 * s)]
-    marks = []
+    am, marks = [], []
     for h in (1, 2, 3):
         hz = h * gmf
-        comps.append((hz, (5 if h == 1 else 2.4 if h == 2 else 1.1) * s))
+        # worn teeth: the mesh amplitude swells and falls smoothly once per
+        # revolution of the worn gear -> phase locked 1X sidebands
+        am.append((hz, (5 if h == 1 else 2.4 if h == 2 else 1.1) * s, f1, 0.45, None))
         marks.append((hz, ("%dx" % h if h > 1 else "") + "GMF"))
-        for k in (1, 2, 3):
-            comps.append((hz + k * f1, 1.1 * s / (h * k)))
-            comps.append((hz - k * f1, 1.1 * s / (h * k)))
-    return {"comps": comps, "env_band": gmf,
+    return {"comps": comps, "am": am, "env_band": gmf,
             "rand": [_band(fr * 0.8, fr * 1.2, accG=0.01 * s)], "marks": marks}
 
 
 def _f_gearcrack(c):
     s, f1, fr = c["s"], c["f1"], c["fr"]
     gmf = c["teeth"] * f1
-    comps = [(gmf, 3.2 * s), (2 * gmf, 1.4 * s), (f1, 1.6 * s)]
-    for k in range(1, 9):
-        comps.append((gmf + k * f1, 1.5 * s / math.sqrt(k)))
-        comps.append((gmf - k * f1, 1.5 * s / math.sqrt(k)))
-    return {"comps": comps, "env_band": fr,
-            "impacts": [(f1, fr, 2.2 * s, 14.0)],
-            "marks": [(gmf, "GMF"), (f1, "1X")]}
+    # once per revolution the cracked tooth goes through mesh: a short burst
+    # on the mesh carrier (which spreads into a dense family of 1X sidebands
+    # round GMF) plus an impact that rings the gearcase
+    width = 0.02
+    am = [(gmf, 2.6 * s, f1, 3.0, width), (2 * gmf, 1.1 * s, f1, 3.0, width)]
+    return {"comps": [(f1, 1.6 * s)], "am": am, "env_band": fr,
+            "impacts": [(f1, fr, 4.5 * s, 14.0)],
+            "marks": [(gmf, "GMF"), (2 * gmf, "2xGMF"), (f1, "1X")]}
 
 
 def _f_blade(c):
@@ -445,11 +452,10 @@ def _f_elec(c):
 
 def _f_rotorbar(c):
     s, f1, ppf = c["s"], c["f1"], c["ppf"]
-    comps = [(f1, 3.2 * s), (2 * f1, 0.9 * s)]
-    for k in (1, 2, 3):
-        comps.append((f1 + k * ppf, 0.75 * s / k))
-        comps.append((f1 - k * ppf, 0.75 * s / k))
-    return {"comps": comps,
+    # 1X amplitude rises and falls at pole pass frequency (a slow beat)
+    comps = [(2 * f1, 0.9 * s)]
+    am = [(f1, 3.2 * s, ppf, 0.5, None)]
+    return {"comps": comps, "am": am,
             "marks": [(f1, "1X"), (f1 + ppf, "+PPF"), (f1 - ppf, "-PPF")]}
 
 
@@ -946,6 +952,7 @@ def compute(st):
     comps = base["comps"] + list(m.get("comps", []))
     rand = base["rand"] + list(m.get("rand", []))
     impacts = list(m.get("impacts", []))
+    am = list(m.get("am", []))
     clip = m.get("clip")
     seed = _hash_seed(f["id"]) + st.poles
 
@@ -986,6 +993,29 @@ def compute(st):
                         buf[i] += a0 * env * math.sin(w * td)
                     i += 1
                 k += 1
+        for (fc, v, rate, depth, width) in am:
+            if fc <= 0.0 or v <= 0.0:
+                continue
+            if st.aa and fc >= nyq:
+                continue
+            amp = vel_to_disp(v, fc) * unit_gain(unit, fc)
+            ph = rl.next() * TAU
+            wc = TAU * fc * dt
+            if width is None or rate <= 0.0:
+                wm = TAU * rate * dt
+                pm = rl.next() * TAU
+                for i in range(n2):
+                    buf[i] += amp * (1.0 + depth * math.cos(wm * i + pm)) * math.sin(wc * i + ph)
+            else:
+                period = 1.0 / rate
+                sig = width * period
+                t_first = 0.0          # in step with any impact train, which starts at 0
+                inv = 0.5 / (sig * sig)
+                for i in range(n2):
+                    t = i * dt - t_first
+                    u = t - period * math.floor(t / period + 0.5)   # nearest burst
+                    g = math.exp(-u * u * inv) if abs(u) < 5.0 * sig else 0.0
+                    buf[i] += amp * (1.0 + depth * g) * math.sin(wc * i + ph)
         _add_random(buf, n2, fs, rand, Rand(seed + 7), unit)
         return buf
 

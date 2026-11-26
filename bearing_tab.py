@@ -295,7 +295,9 @@ class CatalogTab(BoxLayout):
         self.app.set_selection({
             "source": "catalog",
             "brand": brand, "model": row[0],
-            "BPFO": row[1], "BPFI": row[2], "BSF": row[3], "FTF": row[4],
+            # catalogue rows are [model, BPFI, BPFO, BSF, FTF, balls]:
+            # inner-race pass rate is always the higher of the two
+            "BPFI": row[1], "BPFO": row[2], "BSF": row[3], "FTF": row[4],
         })
 
 
@@ -695,7 +697,7 @@ class BearingScopeApp(App):
         if default_row:
             self.set_selection({
                 "source": "catalog", "brand": "SKF", "model": default_row[0],
-                "BPFO": default_row[1], "BPFI": default_row[2],
+                "BPFI": default_row[1], "BPFO": default_row[2],
                 "BSF": default_row[3], "FTF": default_row[4],
             })
         return self.ui
