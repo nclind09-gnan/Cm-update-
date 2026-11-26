@@ -294,7 +294,7 @@ TURBO_TOPICS = [
              "The probe should sit near the middle of its linear range, and two probes on the same plane should be matched in sensitivity.",
              "Casing-mounted accelerometers still have a role (showing how the housing itself moves relative to ground) but the oil film attenuates shaft motion, limiting what they reveal about the shaft directly.",
          ],
-         tip="Two probes mounted 90 degrees apart (typically X horizontal, Y vertical) are what make orbit and "
+         tip="Two probes mounted 90 degrees apart (per API 670 usually 45 deg either side of vertical: Y left, X right, viewed from the driver) are what make orbit and "
              "centerline analysis possible - a single probe only gives you gap in one direction."),
 
     dict(name="Shaft Centerline Plots & Eccentricity Ratio",
@@ -381,7 +381,7 @@ TURBO_TOPICS = [
              "Bode and Polar plots use the same underlying vector data; Bode separates amplitude and phase onto two axes, Polar combines them into one spiral.",
              "Both are especially useful for finding the slow-roll vector, resonance speeds, synchronous amplification factor, heavy-spot location, and rotor mode shape during a startup or coastdown.",
              "A Cascade (or waterfall) plot stacks spectra over a speed or time range, with frequency on one axis and speed/time on the other - useful for watching how various orders (1X, 2X, oil whirl, blade-pass, etc.) shift and interact.",
-             "A Full Spectrum version of a cascade (built from two orthogonal probes together) separates forward from reverse-precessing components - handy for confirming whether a subsynchronous peak is whirl-like (reverse) or resonance-like (forward).",
+             "A Full Spectrum version of a cascade (built from two orthogonal probes together) separates forward from reverse-precessing components - handy for confirming that a subsynchronous peak is forward-precessing, as oil whirl and whip are; a strong reverse component points elsewhere, e.g. rub or very anisotropic supports.",
              "A Campbell diagram is the design-side counterpart: it plots a rotor's natural frequencies against speed together with excitation lines (1X, blade-pass, oil-whirl band, gear mesh, etc.) to check for crossings that would need to be avoided.",
          ],
          tip="If a resonance crossing looks marginal on a Bode plot, check the corresponding Cascade or Full "

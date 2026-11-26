@@ -765,9 +765,10 @@ BASICS_TOPICS = [
             "actually 2-D motion - an orbit is what fills in the missing dimension."),
         sub("Phase Lag vs. Phase Lead",
             "Phase can be measured against the direction of shaft rotation or with it, and the two "
-            "conventions give answers 360 degrees apart from each other.",
-            "Getting the convention wrong in a balancing job typically puts the correction weight "
-            "roughly opposite where it should go, making the vibration worse instead of better. "
+            "conventions give mirror-image answers (lead = 360 degrees minus lag).",
+            "Getting the convention wrong in a balancing job mirrors the correction angle about the "
+            "reference mark (an angle of theta becomes 360 minus theta), so the weight lands out of "
+            "place by twice the angle and the vibration can get worse instead of better. "
             "This is one of the most consequential conventions to get right in practical vibration "
             "work.",
             "Phase lag measures the angle opposite to the direction of shaft rotation - the "
@@ -2618,8 +2619,9 @@ BASICS_TOPICS = [
                 "The coefficient's angle includes the machine's lag angle automatically.",
                 "A very small effect vector means the trial weight was inadequate - repeat with more.",
             ],
-            "Keep the trial weight in place while calculating - the correction is computed relative "
-            "to the current state, and removing it changes the situation."),
+            "The correction worked out from the ORIGINAL vector assumes the trial weight comes off "
+            "before the correction goes on. If you leave the trial weight on, work the correction "
+            "from the trial-run vector instead, or add the two weights as vectors."),
         sub("Step 4: Calculating the Correction Weight",
             "Divide the original vibration vector by the influence coefficient, then reverse the "
             "direction, to get the weight and angle needed.",
@@ -2699,8 +2701,8 @@ BASICS_TOPICS = [
                 "A result that gets worse indicates a calculation error, a wrong phase convention, or a misdiagnosis.",
             ],
             "If the first correction makes vibration worse rather than better, check your phase "
-            "convention first - a lag/lead mix-up is the most common cause and puts the weight "
-            "roughly 180 degrees out."),
+            "convention first - a lag/lead mix-up is the most common cause: it mirrors the "
+            "correction angle about the reference mark, an error of twice that angle."),
     ]),
 
     dict(name="Two-Plane Balancing", category="Balancing", subtopics=[
