@@ -30,28 +30,116 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
-from kivy.graphics import Color, Rectangle
+from kivy.uix.widget import Widget
+from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp
 from kivy.core.window import Window
+from kivy.core.text import Label as CoreLabel
 
+import theme as T
 from theme import RoundedButton, NavCard, PillButton
 
 # ------------------------------------------------------------------
-# COLORS - a distinct accent (crimson/turbine-red) not used by the other
-# four tools (blue=CM/DX, teal=Rotor, amber=Bearing, purple=Laser)
+# COLORS - theme tokens; the tool's accent is the turbine red from
+# theme.ACCENTS (used on the selected pill, the tip card and Close only)
 # ------------------------------------------------------------------
-BG = (0.078, 0.09, 0.102, 1)
-PANEL = (0.11, 0.129, 0.149, 1)
-TEXT = (0.9, 0.91, 0.925, 1)
-MUTED = (0.545, 0.584, 0.631, 1)
-ACCENT = (0.867, 0.267, 0.298, 1)   # crimson
+BG = T.BG
+PANEL = T.CARD
+TEXT = T.TEXT
+MUTED = T.TEXT_3
+ACCENT = T.ACCENTS["turbo"]
 
 
-def body_label(text, color=TEXT):
-    lbl = Label(text=text, color=color, size_hint_y=None, halign="left", valign="top")
+def body_label(text, color=None, font_size=None):
+    lbl = Label(text=text, color=color or T.TEXT_2, font_size=font_size or T.FS_BODY,
+                line_height=1.25, size_hint_y=None, halign="left", valign="top")
     lbl.bind(width=lambda inst, val: setattr(lbl, "text_size", (val, None)))
-    lbl.bind(texture_size=lambda inst, val: setattr(lbl, "height", val[1] + dp(6)))
+    lbl.bind(texture_size=lambda inst, val: setattr(lbl, "height", val[1] + dp(4)))
     return lbl
+
+
+def _text_width(text):
+    """Rendered width of a pill label (bold, body size), for sizing pills."""
+    lbl = CoreLabel(text=text, font_size=T.FS_BODY, bold=True)
+    lbl.refresh()
+    return lbl.texture.size[0]
+
+
+def _bullet_row(text):
+    """One key point: a quiet bullet and a hanging, wrapping line."""
+    row = BoxLayout(orientation="horizontal", size_hint_y=None, spacing=T.S2)
+    dot = Label(text=u"•", color=T.TEXT_3, font_size=T.FS_BODY, size_hint=(None, None),
+                width=dp(12), height=dp(22), halign="center", valign="top")
+    holder = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(12))
+    holder.add_widget(dot)
+    holder.add_widget(Widget())
+    lbl = body_label(text)
+    lbl.bind(height=lambda w, h: setattr(row, "height", h))
+    row.add_widget(holder)
+    row.add_widget(lbl)
+    return row
+
+
+class DarkPopup(Popup):
+    """A Popup drawn on the dark card surface (rounded, hairline border),
+    title in TEXT and an accent separator."""
+
+    def __init__(self, accent, **kw):
+        kw.setdefault("title_color", T.TEXT)
+        kw.setdefault("title_size", T.FS_HEADER)
+        kw.setdefault("title_font", "Roboto-Bold")
+        kw.setdefault("separator_color", accent)
+        kw.setdefault("separator_height", dp(2))
+        super().__init__(background="", background_color=(0, 0, 0, 0),
+                         overlay_color=(0, 0, 0, 0), **kw)
+        with self.canvas.before:
+            Color(0, 0, 0, 0.72)
+            self._dim = Rectangle(pos=(0, 0), size=Window.size)
+            Color(*T.CARD)
+            self._bg = RoundedRectangle(radius=[T.R_CARD])
+            Color(*T.LINE)
+            self._border = Line(width=dp(1))
+        self.bind(pos=self._redraw, size=self._redraw)
+        Window.bind(size=self._redraw)
+
+    def _redraw(self, *a):
+        self._dim.size = Window.size
+        self._bg.pos, self._bg.size = self.pos, self.size
+        self._border.rounded_rectangle = (self.x, self.y, self.width, self.height, T.R_CARD)
+
+    def on_dismiss(self):
+        Window.unbind(size=self._redraw)
+
+
+def open_detail_popup(title, sections, tip, accent):
+    """sections: list of (caption, text) or (caption, [points]).
+    The practical tip goes last, in a soft accent card."""
+    content = BoxLayout(orientation="vertical", padding=[dp(4), T.S2, dp(4), dp(4)], spacing=T.S3)
+    sc = ScrollView(bar_width=dp(3), bar_color=T.ICON, bar_inactive_color=T.soft(T.ICON, 0.5))
+    inner = GridLayout(cols=1, size_hint_y=None, spacing=T.S2, padding=[0, 0, T.S2, T.S2])
+    inner.bind(minimum_height=inner.setter("height"))
+    for i, (caption, body) in enumerate(sections):
+        if i:
+            inner.add_widget(Widget(size_hint_y=None, height=T.S1))
+        inner.add_widget(T.section_label(caption))
+        if isinstance(body, (list, tuple)):
+            for point in body:
+                inner.add_widget(_bullet_row(point))
+        else:
+            inner.add_widget(body_label(body))
+    inner.add_widget(Widget(size_hint_y=None, height=T.S1))
+    tip_card = T.Card(fill=T.soft(accent, 0.08), border=T.soft(accent, 0.35), spacing=T.S1)
+    tip_card.add_widget(T.section_label("Practical tip", color=accent))
+    tip_card.add_widget(body_label(tip, color=T.TEXT))
+    inner.add_widget(tip_card)
+    sc.add_widget(inner)
+    content.add_widget(sc)
+    close = RoundedButton(text="Close", accent=accent)
+    content.add_widget(close)
+    popup = DarkPopup(accent, title=title, content=content, size_hint=(0.92, 0.85))
+    close.bind(on_release=popup.dismiss)
+    popup.open()
+    return popup
 
 
 # ------------------------------------------------------------------
@@ -686,28 +774,29 @@ class TurboInsightsScreen(Screen):
         outer = BoxLayout(orientation="vertical")
 
         header = BoxLayout(orientation="vertical", size_hint_y=None,
-                            padding=[dp(14), dp(14), dp(14), dp(4)], spacing=dp(4))
+                            padding=[T.S4, T.S4, T.S4, T.S1], spacing=T.S1)
         header.bind(minimum_height=header.setter("height"))
         self.heading = Label(text="[b]Turbomachinery Insights[/b]", markup=True, color=TEXT,
-                             size_hint_y=None, height=dp(30), font_size=dp(18),
+                             size_hint_y=None, height=dp(32), font_size=T.FS_HEADER,
                              halign="left", valign="middle")
+        self.heading.bind(size=lambda w, s: setattr(w, "text_size", s))
         header.add_widget(self.heading)
         intro = body_label(
             "A quick-reference for rotordynamics, turbo-specific instabilities, and general "
             "vibration diagnostics - handy for day-to-day fault-finding and for CAT II-style "
-            "study review. Pick a category, then tap a topic to read more.", MUTED)
+            "study review. Pick a category, then tap a topic to read more.", T.TEXT_2)
         header.add_widget(intro)
         outer.add_widget(header)
 
         # Horizontal, scrollable row of category pill-tabs.
-        tab_scroll = ScrollView(size_hint_y=None, height=dp(54), do_scroll_y=False, bar_width=0)
+        tab_scroll = ScrollView(size_hint_y=None, height=T.TOUCH + T.S2 * 2,
+                                do_scroll_y=False, bar_width=0)
         tab_row = BoxLayout(orientation="horizontal", size_hint_x=None, size_hint_y=1,
-                             spacing=dp(8), padding=[dp(14), dp(6), dp(14), dp(6)])
+                             spacing=T.S2, padding=[T.S4, T.S2, T.S4, T.S2])
         tab_row.bind(minimum_width=tab_row.setter("width"))
         for key, label in CATEGORIES:
-            btn = PillButton(label, accent=ACCENT, inactive=PANEL,
-                              text_color=(1, 1, 1, 1), inactive_text_color=MUTED,
-                              size_hint_x=None, width=dp(14) * max(len(label), 6) + dp(24))
+            btn = PillButton(label, ACCENT, size_hint_x=None,
+                              width=max(_text_width(label) + T.S6 + T.S2, dp(64)))
             btn.bind(on_release=lambda inst, k=key: self.switch_category(k))
             tab_row.add_widget(btn)
             self.tab_buttons[key] = btn
@@ -717,8 +806,8 @@ class TurboInsightsScreen(Screen):
 
         # Scrollable card list - rebuilt whenever the category changes.
         self.list_scroll = ScrollView()
-        self.list_col = BoxLayout(orientation="vertical", spacing=dp(10),
-                                   padding=[dp(14), dp(8), dp(14), dp(14)], size_hint_y=None)
+        self.list_col = BoxLayout(orientation="vertical", spacing=T.S2,
+                                   padding=[T.S4, T.S2, T.S4, T.S4], size_hint_y=None)
         self.list_col.bind(minimum_height=self.list_col.setter("height"))
         self.list_scroll.add_widget(self.list_col)
         outer.add_widget(self.list_scroll)
@@ -739,16 +828,15 @@ class TurboInsightsScreen(Screen):
         self.list_col.clear_widgets()
         topics = TURBO_TOPICS if key == "All" else [t for t in TURBO_TOPICS if t["category"] == key]
         for topic in topics:
-            card = NavCard(topic["name"], topic["category"], ACCENT,
-                            card_bg=PANEL, title_color=TEXT, subtitle_color=MUTED, height=dp(78))
+            card = NavCard(topic["name"], topic["category"], ACCENT, height=dp(76))
             card.bind(on_release=lambda inst, t=topic: self.open_topic(t))
             self.list_col.add_widget(card)
         count_note = Label(text="%d topic%s" % (len(topics), "" if len(topics) == 1 else "s"),
-                            color=MUTED, font_size=dp(12), size_hint_y=None, height=dp(22),
+                            color=MUTED, font_size=T.FS_CAPTION, size_hint_y=None, height=dp(24),
                             halign="left", valign="middle")
         count_note.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
         self.list_col.add_widget(count_note)
-        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=dp(12),
+        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=T.FS_CAPTION,
                        size_hint_y=None, height=dp(30))
         self.list_col.add_widget(footer)
 
@@ -757,21 +845,10 @@ class TurboInsightsScreen(Screen):
         self._bg.size = self.size
 
     def open_topic(self, topic):
-        content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
-        sc = ScrollView()
-        inner = GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
-        inner.bind(minimum_height=inner.setter("height"))
-        inner.add_widget(body_label("Overview:\n" + topic["overview"]))
-        inner.add_widget(body_label(
-            "Key points:\n- " + "\n- ".join(topic["key_points"])))
-        inner.add_widget(body_label("Practical tip:\n" + topic["tip"], ACCENT))
-        sc.add_widget(inner)
-        content.add_widget(sc)
-        close = RoundedButton(text="Close", accent=PANEL)
-        content.add_widget(close)
-        popup = Popup(title=topic["name"], content=content, size_hint=(0.92, 0.85))
-        close.bind(on_release=popup.dismiss)
-        popup.open()
+        return open_detail_popup(
+            topic["name"],
+            [("Overview", topic["overview"]), ("Key points", topic["key_points"])],
+            topic["tip"], ACCENT)
 
 
 class TurboApp(App):

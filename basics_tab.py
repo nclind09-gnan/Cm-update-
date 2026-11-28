@@ -22,27 +22,108 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
-from kivy.graphics import Color, Rectangle
+from kivy.uix.widget import Widget
+from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.core.window import Window
 
+import theme as T
 from theme import RoundedButton, NavCard, PillButton
 
 # ------------------------------------------------------------------
-# COLORS - signal green, distinct from the other five tools
+# COLORS - theme tokens; the tool's accent is the signal green from
+# theme.ACCENTS (used on icons, the tip card and Close only)
 # ------------------------------------------------------------------
-BG = (0.075, 0.09, 0.086, 1)
-PANEL = (0.106, 0.129, 0.122, 1)
-TEXT = (0.9, 0.92, 0.91, 1)
-MUTED = (0.545, 0.60, 0.58, 1)
-ACCENT = (0.22, 0.78, 0.42, 1)   # signal green
+BG = T.BG
+PANEL = T.CARD
+TEXT = T.TEXT
+MUTED = T.TEXT_3
+ACCENT = T.ACCENTS["basics"]
 
 
-def body_label(text, color=TEXT):
-    lbl = Label(text=text, color=color, size_hint_y=None, halign="left", valign="top")
+def body_label(text, color=None, font_size=None):
+    lbl = Label(text=text, color=color or T.TEXT_2, font_size=font_size or T.FS_BODY,
+                line_height=1.25, size_hint_y=None, halign="left", valign="top")
     lbl.bind(width=lambda inst, val: setattr(lbl, "text_size", (val, None)))
-    lbl.bind(texture_size=lambda inst, val: setattr(lbl, "height", val[1] + dp(6)))
+    lbl.bind(texture_size=lambda inst, val: setattr(lbl, "height", val[1] + dp(4)))
     return lbl
+
+
+def _bullet_row(text):
+    """One key point: a quiet bullet and a hanging, wrapping line."""
+    row = BoxLayout(orientation="horizontal", size_hint_y=None, spacing=T.S2)
+    dot = Label(text=u"•", color=T.TEXT_3, font_size=T.FS_BODY, size_hint=(None, None),
+                width=dp(12), height=dp(22), halign="center", valign="top")
+    holder = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(12))
+    holder.add_widget(dot)
+    holder.add_widget(Widget())
+    lbl = body_label(text)
+    lbl.bind(height=lambda w, h: setattr(row, "height", h))
+    row.add_widget(holder)
+    row.add_widget(lbl)
+    return row
+
+
+class DarkPopup(Popup):
+    """A Popup drawn on the dark card surface (rounded, hairline border),
+    title in TEXT and an accent separator."""
+
+    def __init__(self, accent, **kw):
+        kw.setdefault("title_color", T.TEXT)
+        kw.setdefault("title_size", T.FS_HEADER)
+        kw.setdefault("title_font", "Roboto-Bold")
+        kw.setdefault("separator_color", accent)
+        kw.setdefault("separator_height", dp(2))
+        super().__init__(background="", background_color=(0, 0, 0, 0),
+                         overlay_color=(0, 0, 0, 0), **kw)
+        with self.canvas.before:
+            Color(0, 0, 0, 0.72)
+            self._dim = Rectangle(pos=(0, 0), size=Window.size)
+            Color(*T.CARD)
+            self._bg = RoundedRectangle(radius=[T.R_CARD])
+            Color(*T.LINE)
+            self._border = Line(width=dp(1))
+        self.bind(pos=self._redraw, size=self._redraw)
+        Window.bind(size=self._redraw)
+
+    def _redraw(self, *a):
+        self._dim.size = Window.size
+        self._bg.pos, self._bg.size = self.pos, self.size
+        self._border.rounded_rectangle = (self.x, self.y, self.width, self.height, T.R_CARD)
+
+    def on_dismiss(self):
+        Window.unbind(size=self._redraw)
+
+
+def open_detail_popup(title, sections, tip, accent):
+    """sections: list of (caption, text) or (caption, [points]).
+    The practical tip goes last, in a soft accent card."""
+    content = BoxLayout(orientation="vertical", padding=[dp(4), T.S2, dp(4), dp(4)], spacing=T.S3)
+    sc = ScrollView(bar_width=dp(3), bar_color=T.ICON, bar_inactive_color=T.soft(T.ICON, 0.5))
+    inner = GridLayout(cols=1, size_hint_y=None, spacing=T.S2, padding=[0, 0, T.S2, T.S2])
+    inner.bind(minimum_height=inner.setter("height"))
+    for i, (caption, body) in enumerate(sections):
+        if i:
+            inner.add_widget(Widget(size_hint_y=None, height=T.S1))
+        inner.add_widget(T.section_label(caption))
+        if isinstance(body, (list, tuple)):
+            for point in body:
+                inner.add_widget(_bullet_row(point))
+        else:
+            inner.add_widget(body_label(body))
+    inner.add_widget(Widget(size_hint_y=None, height=T.S1))
+    tip_card = T.Card(fill=T.soft(accent, 0.08), border=T.soft(accent, 0.35), spacing=T.S1)
+    tip_card.add_widget(T.section_label("Practical tip", color=accent))
+    tip_card.add_widget(body_label(tip, color=T.TEXT))
+    inner.add_widget(tip_card)
+    sc.add_widget(inner)
+    content.add_widget(sc)
+    close = RoundedButton(text="Close", accent=accent)
+    content.add_widget(close)
+    popup = DarkPopup(accent, title=title, content=content, size_hint=(0.92, 0.85))
+    close.bind(on_release=popup.dismiss)
+    popup.open()
+    return popup
 
 
 def sub(name, overview, why, what, how, key_points, tip):
@@ -3450,8 +3531,8 @@ class SubtopicListScreen(Screen):
 
         root = BoxLayout(orientation="vertical")
 
-        bar = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(52),
-                         padding=[dp(8), dp(4), dp(8), dp(4)], spacing=dp(8))
+        bar = BoxLayout(orientation="horizontal", size_hint_y=None, height=T.TOUCH + T.S2 * 2,
+                         padding=[T.S4, T.S2, T.S4, T.S2], spacing=T.S3)
         with bar.canvas.before:
             Color(*PANEL)
             self._bar_bg = Rectangle(pos=bar.pos, size=bar.size)
@@ -3459,16 +3540,19 @@ class SubtopicListScreen(Screen):
                  size=lambda w, v: setattr(self._bar_bg, "size", v))
         back_btn = PillButton(text="< Back", accent=ACCENT)
         back_btn.size_hint_x = None
-        back_btn.width = dp(90)
+        back_btn.width = dp(96)
         back_btn.bind(on_release=lambda *a: self._on_back())
         bar.add_widget(back_btn)
-        self.title_lbl = Label(text="", bold=True, font_size=sp(16), color=TEXT)
+        self.title_lbl = Label(text="", bold=True, font_size=T.FS_TITLE, color=TEXT,
+                               halign="left", valign="middle", shorten=True,
+                               shorten_from="right")
+        self.title_lbl.bind(size=lambda w, s: setattr(w, "text_size", s))
         bar.add_widget(self.title_lbl)
         root.add_widget(bar)
         self.bar = bar
 
         self.scroll = ScrollView()
-        self.col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(14), size_hint_y=None)
+        self.col = BoxLayout(orientation="vertical", spacing=T.S2, padding=T.S4, size_hint_y=None)
         self.col.bind(minimum_height=self.col.setter("height"))
         self.scroll.add_widget(self.col)
         root.add_widget(self.scroll)
@@ -3483,8 +3567,7 @@ class SubtopicListScreen(Screen):
         self.title_lbl.text = topic["name"]
         self.col.clear_widgets()
         for s in topic["subtopics"]:
-            card = NavCard(s["name"], topic["category"], ACCENT,
-                            card_bg=PANEL, title_color=TEXT, subtitle_color=MUTED, height=dp(72))
+            card = NavCard(s["name"], topic["category"], ACCENT, height=dp(72))
             card.bind(on_release=lambda inst, sub_=s: open_subtopic_cb(sub_))
             self.col.add_widget(card)
 
@@ -3500,27 +3583,27 @@ class TopicListScreen(Screen):
         self.bind(pos=self._redraw, size=self._redraw)
 
         root = ScrollView()
-        col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(14), size_hint_y=None)
+        col = BoxLayout(orientation="vertical", spacing=T.S2, padding=T.S4, size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
 
         self.heading = Label(text="[b]Vibration Basics[/b]", markup=True, color=TEXT,
-                             size_hint_y=None, height=dp(30), font_size=dp(18),
+                             size_hint_y=None, height=dp(32), font_size=T.FS_HEADER,
                              halign="left", valign="middle")
+        self.heading.bind(size=lambda w, s: setattr(w, "text_size", s))
         col.add_widget(self.heading)
         intro = body_label(
             "The foundational concepts the rest of the app builds on. Tap a topic to see its "
             "sub-topics.")
-        intro.color = MUTED
+        intro.color = T.TEXT_2
         col.add_widget(intro)
 
         for topic in BASICS_TOPICS:
             subtitle = "%d sub-topics" % len(topic["subtopics"])
-            card = NavCard(topic["name"], subtitle, ACCENT,
-                            card_bg=PANEL, title_color=TEXT, subtitle_color=MUTED, height=dp(78))
+            card = NavCard(topic["name"], subtitle, ACCENT, height=dp(76), icon="book")
             card.bind(on_release=lambda inst, t=topic: on_pick(t))
             col.add_widget(card)
 
-        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=dp(12),
+        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=T.FS_CAPTION,
                        size_hint_y=None, height=dp(30))
         col.add_widget(footer)
 
@@ -3575,24 +3658,14 @@ class RootWidget(BoxLayout):
             self._bar("Vibration Basics", "Foundational vibration-analysis concepts")
 
     def open_subtopic_popup(self, subtopic):
-        content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
-        sc = ScrollView()
-        inner = GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
-        inner.bind(minimum_height=inner.setter("height"))
-        inner.add_widget(body_label("Overview:\n" + subtopic["overview"]))
-        inner.add_widget(body_label("Why it matters:\n" + subtopic["why"]))
-        inner.add_widget(body_label("What it is:\n" + subtopic["what"]))
-        inner.add_widget(body_label("How it works / is used:\n" + subtopic["how"]))
-        inner.add_widget(body_label(
-            "Key points:\n- " + "\n- ".join(subtopic["key_points"])))
-        inner.add_widget(body_label("Practical tip:\n" + subtopic["tip"], ACCENT))
-        sc.add_widget(inner)
-        content.add_widget(sc)
-        close = RoundedButton(text="Close", accent=PANEL)
-        content.add_widget(close)
-        popup = Popup(title=subtopic["name"], content=content, size_hint=(0.92, 0.85))
-        close.bind(on_release=popup.dismiss)
-        popup.open()
+        return open_detail_popup(
+            subtopic["name"],
+            [("Overview", subtopic["overview"]),
+             ("Why it matters", subtopic["why"]),
+             ("What it is", subtopic["what"]),
+             ("How it works / is used", subtopic["how"]),
+             ("Key points", subtopic["key_points"])],
+            subtopic["tip"], ACCENT)
 
     def handle_back(self):
         """Called by main.py on hardware/gesture back. Returns True if this

@@ -12,8 +12,9 @@ its own internal logic untouched:
   - Vibration Basics (basics_tab.py) - foundational vibration-analysis reference
   - Simulation     (simulation_tab.py) - interactive balance demo and teaching tools
 
-The app opens on a Home screen with one card per tool. Tapping a card
-opens that tool full-screen with its own back bar. Each tool is built the
+The app opens on a Home screen: the four field tools as one grouped list,
+learning and simulation as tiles below. Tapping one opens that tool under a
+shared header (back, title, where you are). Look and tokens: theme.py. Each tool is built the
 first time it is opened (a short "Opening ..." screen shows meanwhile), not
 at launch, so the app starts quickly; after that it stays in memory.
 """
@@ -25,38 +26,30 @@ from kivy.core.window import Window
 from kivy.metrics import dp, sp
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import ScreenManager, Screen, FadeTransition
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, RoundedRectangle, Rectangle
-from theme import NavCard
+from kivy.graphics import Color, Line, RoundedRectangle, Rectangle
+import theme as T
+from theme import IconTile, Icon
 
-# Background color per screen (matches each tool's own design)
-TAB_BG = {
-    "home": (0.055, 0.067, 0.098, 1),      # dark navy, matches the app icon
-    "cmdx": (0.078, 0.09, 0.102, 1),       # CM/DX dark theme
-    "rotor": (1, 1, 1, 1),                 # Rotor Balance white theme
-    "bearing": (0.957, 0.969, 0.984, 1),   # Bearing Freq Scope light theme
-    "laser": (0.043, 0.055, 0.078, 1),     # Laser Align dark theme
-    "turbo": (0.078, 0.09, 0.102, 1),      # Turbomachinery Insights dark theme
-    "basics": (0.075, 0.09, 0.086, 1),     # Vibration Basics dark theme
-    "sim": (1, 1, 1, 1),                   # Simulation light theme
-}
+# every screen sits on the same graphite background now
+TAB_BG = {k: T.BG for k in ("home", "cmdx", "rotor", "bearing", "laser", "turbo", "basics", "sim")}
 
-WHITE = (1, 1, 1, 1)
-MUTED = (0.58, 0.62, 0.70, 1)
-CARD_BG = (0.11, 0.13, 0.18, 1)
+WHITE = T.TEXT
+MUTED = T.TEXT_3
 
+# (name, title, one-line description, accent, icon, group)
 CARD_SPECS = [
-    ("cmdx", "CM/DX", "Vibration, oil, thermal & electrical diagnostics", (0.20, 0.55, 0.95, 1)),
-    ("rotor", "Rotor Balance", "Single-plane influence-coefficient calculator", (0.09, 0.68, 0.62, 1)),
-    ("bearing", "Bearing Freq", "Bearing defect frequency scope & lookup", (0.96, 0.62, 0.18, 1)),
-    ("laser", "Laser Align", "Shaft alignment offset, angularity & soft foot", (0.65, 0.40, 0.95, 1)),
-    ("turbo", "Turbomachinery", "Rotordynamics & turbo fault learning insights", (0.867, 0.267, 0.298, 1)),
-    ("basics", "Vibration Basics", "Foundational vibration-analysis concepts", (0.22, 0.78, 0.42, 1)),
-    ("sim", "Simulation", "Interactive balance demo & teaching tools", (0.886, 0.247, 0.541, 1)),
+    ("cmdx", "CM/DX Diagnostics", "Fault wizard, spectrum, severity, report", T.ACCENTS["cmdx"], "pulse", "field"),
+    ("rotor", "Rotor Balance", "Single & two plane, trial weight, split, trim", T.ACCENTS["rotor"], "rotor", "field"),
+    ("bearing", "Bearing Freq", "14,535 bearings - BPFO BPFI BSF FTF", T.ACCENTS["bearing"], "bearing", "field"),
+    ("laser", "Laser Align", "Foot corrections, soft foot, tolerances", T.ACCENTS["laser"], "align", "field"),
+    ("basics", "Basics", "14 topics", T.ACCENTS["basics"], "book", "learn"),
+    ("turbo", "Turbo", "32 insights", T.ACCENTS["turbo"], "turbine", "learn"),
+    ("sim", "Simulation", "6 labs", T.ACCENTS["sim"], "wave", "learn"),
 ]
 
 TOOL_TITLES = {"cmdx": "CM/DX", "rotor": "Rotor Balance", "bearing": "Bearing Freq",
@@ -71,7 +64,7 @@ TOOL_MODULES = {"cmdx": ("cmdx_tab", "CMDXApp"), "rotor": ("rotor_tab", "Balance
 
 
 def _accent(name):
-    return next(a for n, _, _, a in CARD_SPECS if n == name)
+    return T.ACCENTS[name]
 
 
 def _fit_label(label):
@@ -80,45 +73,155 @@ def _fit_label(label):
     return label
 
 
+class _Row(ButtonBehavior, BoxLayout):
+    """One field-tool row inside the grouped Home card."""
+
+    def __init__(self, title, subtitle, accent, icon, divider, **kwargs):
+        super().__init__(orientation="horizontal", size_hint_y=None, height=dp(72),
+                         padding=[T.S4, T.S3, T.S3, T.S3], spacing=T.S3, **kwargs)
+        with self.canvas.before:
+            self._press = Color(1, 1, 1, 0)
+            self._press_rect = Rectangle()
+            if divider:
+                Color(*T.LINE)
+                self._div = Line(width=1)
+            else:
+                self._div = None
+        self.bind(pos=self._redraw, size=self._redraw,
+                  state=lambda w, v: setattr(self._press, "a", 0.06 if v == "down" else 0))
+        anchor = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(40))
+        anchor.add_widget(Widget())
+        anchor.add_widget(IconTile(icon, accent))
+        anchor.add_widget(Widget())
+        self.add_widget(anchor)
+        col = BoxLayout(orientation="vertical", spacing=dp(2))
+        col.add_widget(Widget())
+        col.add_widget(_fit_label(Label(text=title, bold=True, font_size=T.FS_TITLE, color=T.TEXT,
+                                        halign="left", valign="middle", size_hint_y=None, height=dp(22))))
+        col.add_widget(_fit_label(Label(text=subtitle, font_size=T.FS_BODY, color=T.TEXT_2,
+                                        halign="left", valign="middle", size_hint_y=None, height=dp(20),
+                                        shorten=True, shorten_from="right")))
+        col.add_widget(Widget())
+        self.add_widget(col)
+        chev = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(20))
+        chev.add_widget(Widget())
+        chev.add_widget(Icon("chevron", T.ICON, dp(20)))
+        chev.add_widget(Widget())
+        self.add_widget(chev)
+
+    def _redraw(self, *a):
+        self._press_rect.pos, self._press_rect.size = self.pos, self.size
+        if self._div is not None:
+            self._div.points = [self.x + T.S4 + dp(40) + T.S3, self.y, self.x + self.width, self.y]
+
+
+class _Tile(ButtonBehavior, BoxLayout):
+    """A compact learn/simulate tile on Home."""
+
+    def __init__(self, title, subtitle, accent, icon, **kwargs):
+        super().__init__(orientation="vertical", size_hint_y=None, height=dp(116),
+                         padding=[T.S3, T.S3, T.S3, T.S3], spacing=T.S1, **kwargs)
+        with self.canvas.before:
+            Color(*T.CARD)
+            self._bg = RoundedRectangle(radius=[T.R_CARD])
+            Color(*T.LINE)
+            self._line = Line(width=1)
+            self._press = Color(1, 1, 1, 0)
+            self._press_rect = RoundedRectangle(radius=[T.R_CARD])
+        self.bind(pos=self._redraw, size=self._redraw,
+                  state=lambda w, v: setattr(self._press, "a", 0.06 if v == "down" else 0))
+        self.add_widget(IconTile(icon, accent, dp(36)))
+        self.add_widget(Widget())
+        self.add_widget(_fit_label(Label(text=title, bold=True, font_size=T.FS_BODY, color=T.TEXT,
+                                         halign="left", valign="bottom", size_hint_y=None, height=dp(18))))
+        self.add_widget(_fit_label(Label(text=subtitle, font_size=T.FS_CAPTION, color=T.TEXT_2,
+                                         halign="left", valign="top", size_hint_y=None, height=dp(16))))
+
+    def _redraw(self, *a):
+        self._bg.pos = self._press_rect.pos = self.pos
+        self._bg.size = self._press_rect.size = self.size
+        self._line.rounded_rectangle = (self.x, self.y, self.width, self.height, T.R_CARD)
+
+
+class _Group(BoxLayout):
+    """A rounded card holding rows separated by hairlines."""
+
+    def __init__(self, **kwargs):
+        super().__init__(orientation="vertical", size_hint_y=None, **kwargs)
+        self.bind(minimum_height=self.setter("height"))
+        with self.canvas.before:
+            Color(*T.CARD)
+            self._bg = RoundedRectangle(radius=[T.R_CARD])
+            Color(*T.LINE)
+            self._line = Line(width=1)
+        self.bind(pos=self._redraw, size=self._redraw)
+
+    def _redraw(self, *a):
+        self._bg.pos, self._bg.size = self.pos, self.size
+        self._line.rounded_rectangle = (self.x, self.y, self.width, self.height, T.R_CARD)
+
+
 class HomeScreen(Screen):
+    """Field tools first, as one grouped list; learning and simulation as
+    three tiles below. The thing you came to do is one tap away."""
+
     def __init__(self, on_pick, **kwargs):
         super().__init__(name="home", **kwargs)
         with self.canvas.before:
-            Color(*TAB_BG["home"])
-            self._bg = Rectangle(pos=self.pos, size=self.size)
-        self.bind(pos=self._redraw, size=self._redraw)
+            Color(*T.BG)
+            self._bg = Rectangle(pos=(0, 0), size=self.size)
+        self.bind(size=lambda w, v: setattr(self._bg, "size", v))
 
-        root = BoxLayout(orientation="vertical", padding=[dp(20), dp(36), dp(20), dp(8)], spacing=dp(16))
-
-        header = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(66), spacing=dp(4))
-        header.add_widget(_fit_label(Label(text="CM Toolkit", bold=True, font_size=sp(30), color=WHITE,
-                                            halign="left", valign="bottom", size_hint_y=None, height=dp(40))))
-        header.add_widget(_fit_label(Label(text="Condition Monitoring Suite", font_size=sp(14),
-                                            color=MUTED, halign="left", valign="top",
-                                            size_hint_y=None, height=dp(20))))
-        root.add_widget(header)
-
-        # the cards scroll, so all seven stay reachable on a short phone screen
         scroll = ScrollView(do_scroll_x=False, bar_width=dp(3))
-        cards = BoxLayout(orientation="vertical", spacing=dp(12), size_hint_y=None,
-                          padding=[0, 0, 0, dp(8)])
-        cards.bind(minimum_height=cards.setter("height"))
-        for name, title, subtitle, accent in CARD_SPECS:
-            card = NavCard(title, subtitle, accent, card_bg=CARD_BG,
-                           title_color=WHITE, subtitle_color=MUTED, height=dp(84))
-            card.bind(on_release=lambda inst, n=name: on_pick(n))
-            cards.add_widget(card)
-        scroll.add_widget(cards)
-        root.add_widget(scroll)
+        col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=T.S6,
+                        padding=[T.S4, T.S8, T.S4, T.S4])
+        col.bind(minimum_height=col.setter("height"))
 
-        root.add_widget(Label(text="Built by Gnaneswar", font_size=sp(12), color=MUTED,
-                               size_hint_y=None, height=dp(26)))
+        head = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(62), spacing=dp(2),
+                         padding=[T.S2, 0, T.S2, 0])
+        head.add_widget(_fit_label(Label(text="CONDITION MONITORING SUITE", bold=True,
+                                         font_size=T.FS_CAPTION, color=T.TEXT_3, halign="left",
+                                         valign="bottom", size_hint_y=None, height=dp(20))))
+        head.add_widget(_fit_label(Label(text="CM Toolkit", bold=True, font_size=T.FS_DISPLAY,
+                                         color=T.TEXT, halign="left", valign="top",
+                                         size_hint_y=None, height=dp(40))))
+        col.add_widget(head)
 
-        self.add_widget(root)
+        field = [c for c in CARD_SPECS if c[5] == "field"]
+        learn = [c for c in CARD_SPECS if c[5] == "learn"]
 
-    def _redraw(self, *a):
-        self._bg.pos = self.pos
-        self._bg.size = self.size
+        sec = BoxLayout(orientation="vertical", size_hint_y=None, spacing=T.S2)
+        sec.bind(minimum_height=sec.setter("height"))
+        sec.add_widget(self._caption("Field tools"))
+        group = _Group()
+        for i, (name, title, sub, acc, icon, _g) in enumerate(field):
+            row = _Row(title, sub, acc, icon, divider=i < len(field) - 1)
+            row.bind(on_release=lambda w, n=name: on_pick(n))
+            group.add_widget(row)
+        sec.add_widget(group)
+        col.add_widget(sec)
+
+        sec = BoxLayout(orientation="vertical", size_hint_y=None, spacing=T.S2)
+        sec.bind(minimum_height=sec.setter("height"))
+        sec.add_widget(self._caption("Learn & simulate"))
+        grid = GridLayout(cols=3, spacing=T.S2, size_hint_y=None, height=dp(116))
+        for name, title, sub, acc, icon, _g in learn:
+            tile = _Tile(title, sub, acc, icon)
+            tile.bind(on_release=lambda w, n=name: on_pick(n))
+            grid.add_widget(tile)
+        sec.add_widget(grid)
+        col.add_widget(sec)
+
+        col.add_widget(Label(text="Built by Gnaneswar", font_size=T.FS_CAPTION, color=T.TEXT_3,
+                             size_hint_y=None, height=dp(32)))
+        scroll.add_widget(col)
+        self.add_widget(scroll)
+
+    @staticmethod
+    def _caption(text):
+        return _fit_label(Label(text=text.upper(), bold=True, font_size=T.FS_CAPTION, color=T.TEXT_3,
+                                halign="left", valign="middle", size_hint_y=None, height=dp(20),
+                                padding=[T.S2, 0]))
 
 
 class LoadingScreen(Screen):
@@ -127,16 +230,15 @@ class LoadingScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(name="loading", **kwargs)
         with self.canvas.before:
-            self._bg_color = Color(*TAB_BG["home"])
+            self._bg_color = Color(*T.BG)
             self._bg = Rectangle(pos=(0, 0), size=self.size)
         self.bind(size=lambda w, v: setattr(self._bg, "size", v))
-        self.label = Label(text="", font_size=sp(17), bold=True, color=WHITE)
+        self.label = Label(text="", font_size=T.FS_TITLE, bold=True, color=T.TEXT_2)
         self.add_widget(self.label)
 
     def show(self, title, bg, accent):
         self._bg_color.rgba = bg
-        dark = (bg[0] + bg[1] + bg[2]) < 1.5
-        self.label.color = WHITE if dark else accent
+        self.label.color = accent
         self.label.text = "Opening %s..." % title
 
 
@@ -162,45 +264,73 @@ def _safe_build(build_fn, label):
         return box
 
 
+class _BackButton(ButtonBehavior, Widget):
+    """48 dp back target with a chevron; dims while pressed."""
+
+    def __init__(self, on_back, **kwargs):
+        super().__init__(size_hint=(None, None), size=(T.TOUCH, T.TOUCH), **kwargs)
+        self.bind(pos=self._draw, size=self._draw, state=self._draw)
+        self.bind(on_release=lambda *a: on_back())
+
+    def _draw(self, *a):
+        self.canvas.clear()
+        with self.canvas:
+            Color(1, 1, 1, 0.08 if self.state == "down" else 0)
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[T.R_CARD])
+            T.draw_icon("back", self.center_x, self.center_y, dp(24), T.TEXT)
+
+
 class ToolBar(BoxLayout):
-    """The one header bar every tool shows: a large Back button, the tool's
-    title and an optional subtitle. A tool can change the title/subtitle as
-    you move around inside it (see bind_bar in each tool), so tools no
-    longer need a second header of their own."""
+    """The one header every tool shows: back, title, a subtitle that follows
+    where you are inside the tool, and the tool's accent dot. A tool drives
+    the title/subtitle through bind_bar, so tools have no header of their own."""
 
     def __init__(self, name, on_back, **kwargs):
-        super().__init__(size_hint_y=None, height=dp(60), padding=[dp(4), dp(6), dp(12), dp(6)],
-                         spacing=dp(6), **kwargs)
+        super().__init__(size_hint_y=None, height=dp(64), padding=[dp(4), dp(8), T.S4, dp(8)],
+                         spacing=dp(4), **kwargs)
         accent = _accent(name)
         with self.canvas.before:
-            Color(*accent)
+            Color(*T.BG)
             self._bg = Rectangle(pos=self.pos, size=self.size)
-        self.bind(pos=lambda w, v: setattr(self._bg, "pos", v),
-                  size=lambda w, v: setattr(self._bg, "size", v))
+            Color(*T.LINE)
+            self._div = Line(width=1)
+        self.bind(pos=self._redraw, size=self._redraw)
 
-        back = Button(text="<  Back", bold=True, font_size=sp(16), size_hint_x=None, width=dp(96),
-                      background_normal="", background_down="", background_color=(0, 0, 0, 0.12),
-                      color=WHITE)
-        back.bind(on_release=lambda *a: on_back())
-        self.add_widget(back)
+        self.back = _BackButton(on_back)
+        self.add_widget(self.back)
 
-        col = BoxLayout(orientation="vertical", padding=[dp(6), 0, 0, 0])
-        self.title_lbl = _fit_label(Label(text=TOOL_TITLES[name], bold=True, font_size=sp(18),
-                                          color=WHITE, halign="left", valign="middle",
+        col = BoxLayout(orientation="vertical", padding=[dp(4), 0, 0, 0])
+        self.title_lbl = _fit_label(Label(text=TOOL_TITLES[name], bold=True, font_size=T.FS_HEADER,
+                                          color=T.TEXT, halign="left", valign="middle",
                                           shorten=True, shorten_from="right"))
-        self.sub_lbl = _fit_label(Label(text="", font_size=sp(12.5), color=(1, 1, 1, 0.85),
+        self.sub_lbl = _fit_label(Label(text="", font_size=T.FS_CAPTION, color=T.TEXT_2,
                                         halign="left", valign="top", size_hint_y=None, height=0,
                                         shorten=True, shorten_from="right"))
         col.add_widget(self.title_lbl)
         col.add_widget(self.sub_lbl)
         self.add_widget(col)
 
+        dot = Widget(size_hint=(None, None), size=(dp(10), dp(10)))
+        with dot.canvas:
+            Color(*accent)
+            d = RoundedRectangle(size=(dp(10), dp(10)), radius=[dp(5)])
+        dot.bind(pos=lambda w, v: setattr(d, "pos", v))
+        wrap = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(10))
+        wrap.add_widget(Widget())
+        wrap.add_widget(dot)
+        wrap.add_widget(Widget())
+        self.add_widget(wrap)
+
+    def _redraw(self, *a):
+        self._bg.pos, self._bg.size = self.pos, self.size
+        self._div.points = [self.x, self.y, self.x + self.width, self.y]
+
     def set(self, title=None, subtitle=None):
         if title is not None:
             self.title_lbl.text = title
         if subtitle is not None:
             self.sub_lbl.text = subtitle
-            self.sub_lbl.height = dp(18) if subtitle else 0
+            self.sub_lbl.height = dp(16) if subtitle else 0
 
 
 def _tool_screen(name, root_widget, on_back):

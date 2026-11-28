@@ -47,6 +47,7 @@ from kivy.uix.slider import Slider
 from kivy.uix.spinner import Spinner
 from kivy.uix.widget import Widget
 
+import theme as TH
 from theme import ModernInput, NavCard, PillButton, RoundedButton
 import fault_engine
 import orbit_engine
@@ -58,34 +59,41 @@ from rotor_tab import (
 )
 
 # ---------- palette: rose accent, distinct from the other six tools ----------
-COLOR_BG = (1, 1, 1, 1)
-COLOR_ACCENT = (0.886, 0.247, 0.541, 1)        # rose
-COLOR_ACCENT_SOFT = (0.973, 0.882, 0.929, 1)
-COLOR_TEXT = (0.06, 0.09, 0.16, 1)
-COLOR_TEXT_MUTED = (0.357, 0.392, 0.447, 1)
-COLOR_PANEL_BG = (0.97, 0.97, 0.98, 1)
-COLOR_BORDER = (0.86, 0.88, 0.92, 1)
-COLOR_GRID = (0.84, 0.86, 0.90, 1)
-COLOR_GRID_FAINT = (0.92, 0.93, 0.96, 1)
+COLOR_BG = TH.BG
+COLOR_ACCENT = TH.ACCENTS["sim"]                 # rose
+COLOR_ACCENT_SOFT = TH.soft(COLOR_ACCENT, 0.16)
+COLOR_TEXT = TH.TEXT
+COLOR_TEXT_MUTED = TH.TEXT_3
+COLOR_PANEL_BG = TH.CARD
+COLOR_BORDER = TH.LINE
+COLOR_GRID = TH.GRID
+COLOR_GRID_FAINT = TH.GRID_FAINT
+COLOR_PLOT_BG = TH.PLOT_BG
 
-TEXT_HEX = "0F172A"
-MUTED_HEX = "5B6472"
-ACCENT_HEX = "E23F8A"
+TEXT_HEX = TH.TEXT_HEX
+MUTED_HEX = TH.TEXT_2_HEX
+ACCENT_HEX = TH.hex_of(COLOR_ACCENT)
 
-# Vector colours, following the convention of the reference balancer
-C_ORIGINAL = (0.153, 0.306, 0.788)      # blue   - O
-C_TRIALRUN = (0.055, 0.561, 0.267)      # green  - O+T
-C_EFFECT = (0.886, 0.400, 0.055)        # orange - T (effect of trial weight)
-C_CORRECTION = (0.820, 0.180, 0.180)    # red    - correction weight
-C_TRIMRUN = (0.502, 0.251, 0.682)       # purple - trim run
-C_TRIMWT = (0.839, 0.651, 0.055)        # amber  - final trim weight
 
-HEX_ORIGINAL = "274EC9"
-HEX_TRIALRUN = "0E8F44"
-HEX_EFFECT = "E2660E"
-HEX_CORRECTION = "D12E2E"
-HEX_TRIMRUN = "8040AE"
-HEX_TRIMWT = "D6A60E"
+def _rgb(name):
+    """A dark-tuned series colour as an (r, g, b) triple."""
+    return tuple(TH.SERIES[name][:3])
+
+
+# vector colours (rgb triples; alpha added where drawn)
+C_ORIGINAL = _rgb("blue")       # blue   - O
+C_TRIALRUN = _rgb("green")      # green  - O+T
+C_EFFECT = _rgb("orange")       # orange - T (effect of trial weight)
+C_CORRECTION = _rgb("red")      # red    - correction weight
+C_TRIMRUN = _rgb("purple")      # purple - trim run
+C_TRIMWT = _rgb("amber")        # amber  - final trim weight
+
+HEX_ORIGINAL = TH.hex_of(C_ORIGINAL)
+HEX_TRIALRUN = TH.hex_of(C_TRIALRUN)
+HEX_EFFECT = TH.hex_of(C_EFFECT)
+HEX_CORRECTION = TH.hex_of(C_CORRECTION)
+HEX_TRIMRUN = TH.hex_of(C_TRIMRUN)
+HEX_TRIMWT = TH.hex_of(C_TRIMWT)
 
 
 # =====================================================================
@@ -253,14 +261,14 @@ class SliderField(BoxLayout):
     def __init__(self, label_text, value, vmin, vmax, on_change,
                  fmt="{:.2f}", wrap=False, **kwargs):
         super().__init__(orientation="vertical", size_hint_y=None,
-                         height=dp(92), spacing=dp(2), **kwargs)
+                         height=dp(98), spacing=dp(2), **kwargs)
         self._on_change = on_change
         self._fmt = fmt
         self._wrap = wrap          # True for angles: 0-360 wrap-around
         self._vmin, self._vmax = vmin, vmax
         self._syncing = False
 
-        top = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(44),
+        top = BoxLayout(orientation="horizontal", size_hint_y=None, height=TH.TOUCH,
                         spacing=dp(8))
         lbl = Label(text=label_text, font_size=dp(13), bold=True,
                     color=COLOR_TEXT_MUTED, halign="left", valign="middle")
@@ -268,9 +276,8 @@ class SliderField(BoxLayout):
         top.add_widget(lbl)
 
         self.field = ModernInput(
-            text=fmt.format(value), multiline=False, height=dp(42),
-            font_size=dp(16), panel_color=COLOR_BORDER,
-            text_color=COLOR_TEXT, accent=COLOR_ACCENT,
+            text=fmt.format(value), multiline=False, height=TH.TOUCH,
+            font_size=dp(16), accent=COLOR_ACCENT,
             size_hint_x=None, width=dp(104),
         )
         self.field.ti.bind(text=self._on_text)
@@ -420,14 +427,10 @@ class BalanceDemoScreen(Screen):
         disp = panel()
         disp.add_widget(step_header("", "SHOW", TEXT_HEX))
         row1 = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
-        self.btn_o = PillButton("O", accent=C_ORIGINAL + (1,), inactive=COLOR_PANEL_BG,
-                                text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
-        self.btn_ot = PillButton("O+T", accent=C_TRIALRUN + (1,), inactive=COLOR_PANEL_BG,
-                                 text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
-        self.btn_t = PillButton("T", accent=C_EFFECT + (1,), inactive=COLOR_PANEL_BG,
-                                text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
-        self.btn_trim = PillButton("Trim", accent=C_TRIMRUN + (1,), inactive=COLOR_PANEL_BG,
-                                   text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+        self.btn_o = PillButton("O", accent=C_ORIGINAL + (1,))
+        self.btn_ot = PillButton("O+T", accent=C_TRIALRUN + (1,))
+        self.btn_t = PillButton("T", accent=C_EFFECT + (1,))
+        self.btn_trim = PillButton("Trim", accent=C_TRIMRUN + (1,))
         self.btn_o.bind(on_release=lambda i: self._toggle("show_o", self.btn_o))
         self.btn_ot.bind(on_release=lambda i: self._toggle("show_ot", self.btn_ot))
         self.btn_t.bind(on_release=lambda i: self._toggle("show_t", self.btn_t))
@@ -437,9 +440,7 @@ class BalanceDemoScreen(Screen):
         disp.add_widget(row1)
 
         row2 = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
-        self.btn_labels = PillButton("Vector labels", accent=COLOR_ACCENT,
-                                     inactive=COLOR_PANEL_BG, text_color=(1, 1, 1, 1),
-                                     inactive_text_color=COLOR_TEXT)
+        self.btn_labels = PillButton("Vector labels", accent=COLOR_ACCENT)
         self.btn_labels.bind(on_release=lambda i: self._toggle("show_labels", self.btn_labels))
         row2.add_widget(self.btn_labels)
         disp.add_widget(row2)
@@ -659,12 +660,12 @@ class BalanceDemoScreen(Screen):
 # =====================================================================
 # Fault Signature - waveform and spectrum synthesised from machine geometry
 # =====================================================================
-C_TRACE = (0.043, 0.431, 0.659)
-C_MARK = (0.710, 0.325, 0.102)
-BAND_V = (0.918, 0.957, 0.925, 1)
-BAND_A = (0.969, 0.933, 0.957, 1)
-BAND_H = (0.929, 0.937, 0.973, 1)
-ZONE_COLOR = {"A": "1A7A4A", "B": "2F6F3E", "C": "9A5B00", "D": "A8291F"}
+C_TRACE = _rgb("blue")
+C_MARK = _rgb("orange")
+BAND_V = TH.soft(TH.SERIES["green"], 0.07)
+BAND_A = TH.soft(TH.SERIES["red"], 0.07)
+BAND_H = TH.soft(TH.SERIES["blue"], 0.07)
+ZONE_COLOR = {"A": TH.GOOD_HEX, "B": TH.hex_of(TH.SERIES["green"]), "C": TH.ALERT_HEX, "D": TH.DANGER_HEX}
 
 
 def _eng(v):
@@ -753,7 +754,7 @@ class TraceChart(Widget):
         muted = (*COLOR_TEXT_MUTED[:3], 1)
 
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=(self.x, self.y), size=self.size)
 
             if self.kind == "spec" and self.show_bands and not r.env:
@@ -941,8 +942,7 @@ class Segment(BoxLayout):
         self._on_change = on_change
         self.value = value
         for key, text in options:
-            btn = PillButton(text, accent=COLOR_ACCENT, inactive=COLOR_PANEL_BG,
-                             text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            btn = PillButton(text, accent=COLOR_ACCENT)
             btn.bind(on_release=lambda i, k=key: self._pick(k))
             row.add_widget(btn)
             self.buttons[key] = btn
@@ -984,7 +984,7 @@ class Choice(BoxLayout):
             values=[t for _, t in options],
             size_hint_y=None, height=dp(36), font_size=dp(13),
             background_normal="", background_down="",
-            background_color=COLOR_PANEL_BG, color=COLOR_TEXT)
+            background_color=COLOR_BG, color=COLOR_TEXT)
         self.spinner.bind(text=self._picked)
         self.add_widget(self.spinner)
         self.value = value
@@ -1103,8 +1103,7 @@ class FaultSignatureScreen(Screen):
                          size=lambda w, v: setattr(w._r, "size", v))
                 row.add_widget(sep)
             group = f["group"]
-            btn = PillButton(f["name"], accent=COLOR_ACCENT, inactive=COLOR_PANEL_BG,
-                             text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            btn = PillButton(f["name"], accent=COLOR_ACCENT)
             btn.label.font_size = dp(12)
             btn.label.texture_update()
             btn.size_hint_x = None
@@ -1157,7 +1156,7 @@ class FaultSignatureScreen(Screen):
                           texture_size=lambda i, ts: setattr(i, "height", ts[1]))
         box.add_widget(self.readout)
         self.warn = Label(text="", markup=True, font_size=dp(11),
-                          color=(0.60, 0.36, 0.02, 1), halign="left", valign="top",
+                          color=TH.ALERT_TEXT, halign="left", valign="top",
                           size_hint_y=None, height=0)
         self.warn.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
         box.add_widget(self.warn)
@@ -1345,7 +1344,7 @@ class FaultSignatureScreen(Screen):
         try:
             self.res = fault_engine.compute(self.st)
         except Exception as exc:
-            self.readout.text = "[color=B00020]Could not build this signal: %s[/color]" % exc
+            self.readout.text = "[color=%s]Could not build this signal: %s[/color]" % (TH.DANGER_HEX, exc)
             return
         self._refresh()
 
@@ -1431,15 +1430,15 @@ class FaultSignatureScreen(Screen):
             verdict_col = MUTED_HEX
             verdict_txt = "BROADBAND"
         elif bins >= 3.0:
-            verdict_col = "1A7A4A"
+            verdict_col = TH.GOOD_HEX
             verdict_txt = "RESOLVED"
         elif bins >= 2.0:
-            verdict_col = "CC8800"
+            verdict_col = TH.ALERT_HEX
             verdict_txt = "MARGINAL"
         else:
             need = st.fmax * 3.0 / key_hz
             opts = [n for n in (200, 400, 800, 1600, 3200) if n >= need]
-            verdict_col = "A8291F"
+            verdict_col = TH.DANGER_HEX
             if opts:
                 verdict_txt = "TOO COARSE - set %d lines" % opts[0]
             else:
@@ -1454,7 +1453,7 @@ class FaultSignatureScreen(Screen):
                                   % (verdict_col, verdict_txt, key_hz, key_name, bins))
 
         # readout
-        zc = ZONE_COLOR.get(r.zone, "5B6472")
+        zc = ZONE_COLOR.get(r.zone, MUTED_HEX)
         bits = ["Shaft [b]%.0f rpm[/b] = %.2f Hz" % (st.rpm, r.f1),
                 "Nyquist %.0f Hz" % (r.fs / 2.0),
                 "Crest factor [b]%.2f[/b]" % r.crest]
@@ -1513,11 +1512,11 @@ class FaultSignatureScreen(Screen):
 # =====================================================================
 # Shared plotting base for the rotor dynamics tools
 # =====================================================================
-C_ORBIT = (0.153, 0.306, 0.788)          # blue: the orbit and X probe
-C_ORBIT_Y = (0.055, 0.561, 0.267)        # green: Y probe
-C_CLEAR = (0.820, 0.180, 0.180)          # red: clearance / limits
-C_OPBAND = (0.937, 0.953, 1.0, 1)        # operating speed range
-C_PHASE = (0.502, 0.251, 0.682)          # purple: phase
+C_ORBIT = _rgb("blue")                  # blue: the orbit and X probe
+C_ORBIT_Y = _rgb("green")                # green: Y probe
+C_CLEAR = _rgb("red")                    # red: clearance / limits
+C_OPBAND = TH.soft(TH.SERIES["blue"], 0.10)       # operating speed range
+C_PHASE = _rgb("purple")                  # purple: phase
 
 
 def _nice_step(span, divs=4):
@@ -1622,7 +1621,7 @@ class OrbitChart(_Plot):
         muted = (*COLOR_TEXT_MUTED[:3], 1)
 
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             # rings
             ring = step
@@ -1674,7 +1673,7 @@ class OrbitChart(_Plot):
                 if i >= n_show:
                     break
                 x, y = cx + oh[i] * k, cy + ov[i] * k
-                Color(1, 1, 1, 1)
+                Color(*COLOR_PLOT_BG)
                 Ellipse(pos=(x - dr - dp(1.5), y - dr - dp(1.5)),
                         size=(2 * dr + dp(3), 2 * dr + dp(3)))
                 Color(*COLOR_TEXT[:3], 1)
@@ -1749,7 +1748,7 @@ class TimebaseChart(_Plot):
         panels = (("x", "X", C_ORBIT, self.y + B + ph + gap),
                   ("y", "Y", C_ORBIT_Y, self.y + B))
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             for key, name, col, y0 in panels:
                 Color(*COLOR_GRID_FAINT)
@@ -1819,9 +1818,9 @@ class FullSpectrumChart(_Plot):
         to_x = lambda o: x0 + pw * (o + om) / (2 * om)
         muted = (*COLOR_TEXT_MUTED[:3], 1)
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
-            Color(0.973, 0.965, 0.988, 1)
+            Color(*TH.soft(TH.SERIES["purple"], 0.06))
             Rectangle(pos=(x0, y0), size=(pw / 2.0, ph))
             Color(*COLOR_GRID_FAINT)
             for o in range(-4, 5):
@@ -1939,7 +1938,7 @@ class BodeChart(_Plot):
         muted = (*COLOR_TEXT_MUTED[:3], 1)
         crits = b.get("crits", [])
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             # operating range on both panels
             Color(*C_OPBAND)
@@ -2020,8 +2019,8 @@ class BodeChart(_Plot):
 
 
 TAU = 2.0 * math.pi
-C_MODE1 = (0.122, 0.541, 0.357)      # green: first mode
-C_MODE2 = (0.769, 0.416, 0.071)      # orange: second mode
+C_MODE1 = _rgb("green")      # green: first mode
+C_MODE2 = _rgb("orange")      # orange: second mode
 
 
 class ShaftChart(_Plot):
@@ -2085,7 +2084,7 @@ class ShaftChart(_Plot):
         X = lambda f: x0 + pw * f
         muted = (*COLOR_TEXT_MUTED[:3], 1)
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             # scale bar: full height is the largest bend of the coast-down
             sx = X(1) + dp(30)
@@ -2118,8 +2117,8 @@ class ShaftChart(_Plot):
                         (*C_MODE2, 1), 9)
 
 
-C_HIGH = (0.784, 0.208, 0.180)       # red: high spot
-C_HEAVY = (0.086, 0.094, 0.153)      # near black: heavy spot
+C_HIGH = _rgb("red")      # red: high spot
+C_HEAVY = tuple(TH.TEXT[:3])         # white: heavy spot (reads on the dark plot)
 
 
 class EndViewChart(_Plot):
@@ -2154,7 +2153,7 @@ class EndViewChart(_Plot):
         cx, cy, R0, k, rd = self._geom()
         rot = self.st.rotor.rot
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             Color(*COLOR_GRID)
             Line(circle=(cx, cy, R0), width=1.3)
@@ -2246,7 +2245,7 @@ class LagCurveChart(_Plot):
         Y = lambda d: y0 + ph - ph * (d - lo) / (hi - lo)       # lag grows downward
         muted = (*COLOR_TEXT_MUTED[:3], 1)
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             Color(*C_OPBAND)
             Rectangle(pos=(X(st.op_min), y0), size=(X(st.op_max) - X(st.op_min), ph))
@@ -2297,7 +2296,7 @@ class ModeRefChart(_Plot):
         yc, a = self.center_y, self.height / 2.0 - dp(6)
         col = C_MODE1 if self.mode == 1 else C_MODE2
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             Color(*COLOR_GRID)
             Line(points=[x0, yc, x0 + pw, yc], width=1, dash_length=dp(4), dash_offset=dp(3))
@@ -2409,8 +2408,7 @@ class OrbitScreen(_ToolScreen):
         grid = GridLayout(cols=3, size_hint_y=None, height=dp(80), spacing=dp(6))
         self.cond_buttons = {}
         for c in orbit_engine.CONDITIONS:
-            btn = PillButton(c["name"], accent=COLOR_ACCENT, inactive=COLOR_PANEL_BG,
-                             text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            btn = PillButton(c["name"], accent=COLOR_ACCENT)
             btn.label.font_size = dp(11.5)
             btn.label.halign = "center"
             btn.label.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
@@ -2572,9 +2570,9 @@ class OrbitScreen(_ToolScreen):
         if fwd + rev <= 1e-9:
             prec = "none"
         elif fwd >= rev:
-            prec = "[color=1A7A4A][b]FORWARD[/b][/color]"
+            prec = "[color=%s][b]FORWARD[/b][/color]" % TH.GOOD_HEX
         else:
-            prec = "[color=A8291F][b]REVERSE[/b][/color]"
+            prec = "[color=%s][b]REVERSE[/b][/color]" % TH.DANGER_HEX
         ell = (min(fwd, rev) / max(fwd, rev)) if max(fwd, rev) > 0 else 0.0
         shape = ("near circular" if fwd > 0 and rev / max(fwd, 1e-9) < 0.1 else
                  "line (all in one direction)" if ell > 0.85 else "elliptical")
@@ -2591,7 +2589,7 @@ class OrbitScreen(_ToolScreen):
         if r["whirl"] is not None:
             f_rpm, lock = r["whirl"]
             if lock > 0:
-                bits.append("[color=A8291F][b]Whip:[/b][/color] locked at the first critical "
+                bits.append("[color=" + TH.DANGER_HEX + "][b]Whip:[/b][/color] locked at the first critical "
                             "(%.0f cpm) - no longer tracking speed" % f_rpm)
             else:
                 bits.append("Whirl tracks speed at %.2fX; it locks into whip once that "
@@ -2657,8 +2655,7 @@ class ResonanceScreen(_ToolScreen):
         grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(6))
         grid.bind(minimum_height=grid.setter("height"))
         for name, settings in self.SCENARIOS:
-            btn = PillButton(name, accent=COLOR_ACCENT, inactive=COLOR_PANEL_BG,
-                             text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            btn = PillButton(name, accent=COLOR_ACCENT)
             btn.size_hint_y = None
             btn.height = dp(36)
             btn.label.font_size = dp(11.5)
@@ -2834,7 +2831,7 @@ class ResonanceScreen(_ToolScreen):
     def _card_in(self, parent):
         box = BoxLayout(orientation="vertical", size_hint_y=None, padding=dp(8), spacing=dp(6))
         with box.canvas.before:
-            Color(*COLOR_ACCENT_SOFT)
+            Color(*TH.RAISED)
             box._bg = RoundedRectangle(radius=[dp(8)])
         box.bind(pos=lambda w, v: setattr(w._bg, "pos", v),
                  size=lambda w, v: setattr(w._bg, "size", v))
@@ -2965,9 +2962,10 @@ class ResonanceScreen(_ToolScreen):
         self.end_meta.text = ("Looking along the shaft at the unbalance (%.0f%% of span), viewed from "
                               "the driver end, %.0f rpm. The disc whirls round its orbit, drawn to one "
                               "scale for the whole coast-down." % (st.xu * 100, self.cursor))
-        self.end_legend.text = ("[color=161827][b]black[/b][/color] heavy spot (where the unbalance is)   "
-                                "[color=C8352E][b]red[/b][/color] high spot (the side that bulges out)   "
-                                "lag [color=C8352E][b]%.0f deg[/b][/color]" % lag)
+        self.end_legend.text = ("[color=%s][b]white[/b][/color] heavy spot (where the unbalance is)   "
+                                "[color=%s][b]red[/b][/color] high spot (the side that bulges out)   "
+                                "lag [color=%s][b]%.0f deg[/b][/color]"
+                                % (TH.hex_of(C_HEAVY), TH.hex_of(C_HIGH), TH.hex_of(C_HIGH), lag))
         swing = (self.cursor > 1.25 * st.rotor.nc and self.cursor < 0.9 * st.nc2
                  and abs(orbit_engine.mode_shape(2, st.xu)) > 0.2)
         self.end_text.text = ("High spot lags heavy spot by [b]%.0f deg[/b] against rotation: %s.%s"
@@ -2998,7 +2996,7 @@ class ResonanceScreen(_ToolScreen):
     def _verdict(self):
         b = self.sw
         st = self.st
-        ok_hex, bad_hex = "1A7A4A", "A8291F"
+        ok_hex, bad_hex = TH.GOOD_HEX, TH.DANGER_HEX
         lines = []
         reasons = {"node": "the unbalance is at its node, so it is not excited",
                    "probe": "the probe is at its node, so it cannot see it",
@@ -3064,16 +3062,17 @@ class ResonanceScreen(_ToolScreen):
         full = b["shape_max"] or 1.0
         self.mix.text = ("Largest bend now [b]%.1f um pp[/b] at %.0f%% of span - %.0f%% of the "
                          "coast-down maximum (%.0f um pp near %.0f rpm)\n"
-                         "Mode mix: [color=1F8A5B][b]mode 1 %d%%[/b][/color]  "
-                         "[color=C46A12][b]mode 2 %d%%[/b][/color]"
-                         % (2 * big, at * 100, 100 * big / full, 2 * full, b["shape_max_rpm"], p1, 100 - p1))
+                         "Mode mix: [color=%s][b]mode 1 %d%%[/b][/color]  "
+                         "[color=%s][b]mode 2 %d%%[/b][/color]"
+                         % (2 * big, at * 100, 100 * big / full, 2 * full, b["shape_max_rpm"],
+                            TH.hex_of(C_MODE1), p1, TH.hex_of(C_MODE2), 100 - p1))
         try:
             r = orbit_engine.orbit_at(st, self.cursor)
         except Exception:
             return
         self.mini.set_data(r, 1, "auto")
         p = r["probes"][st.probe]
-        prec = ("[color=1A7A4A]forward[/color]" if r["fwd1"] >= r["rev1"] else "[color=A8291F]reverse[/color]")
+        prec = (("[color=%s]forward[/color]" % TH.GOOD_HEX) if r["fwd1"] >= r["rev1"] else ("[color=%s]reverse[/color]" % TH.DANGER_HEX))
         self.cur_text.text = ("[b]%.0f rpm[/b]\n%.2f x 1st, %.2f x 2nd\n\n"
                               "%s probe 1X\n[b]%.1f um pp / %.0f deg[/b]\n\n"
                               "1X precession %s"
@@ -3084,14 +3083,14 @@ class ResonanceScreen(_ToolScreen):
 # =====================================================================
 # Phase survey tool
 # =====================================================================
-C_H = (0.153, 0.306, 0.788)          # blue: horizontal
-C_V = (0.055, 0.561, 0.267)          # green: vertical
-C_A = (0.886, 0.400, 0.055)          # orange: axial
-C_TACH = (0.784, 0.208, 0.180)       # red: tach pulse
-C_STEEL = (0.80, 0.83, 0.87)
-C_STEEL2 = (0.62, 0.66, 0.72)
-HEX_H, HEX_V, HEX_A = "274EC9", "0E8F44", "E2660E"
-REL_HEX = {"in": "1A7A4A", "anti": "A8291F", "quad": "274EC9", "mid": "9A5B00"}
+C_H = _rgb("blue")         # blue: horizontal
+C_V = _rgb("green")         # green: vertical
+C_A = _rgb("orange")         # orange: axial
+C_TACH = _rgb("red")      # red: tach pulse
+C_STEEL = (0.271, 0.302, 0.345)     # machine body: mid grey on the dark plot
+C_STEEL2 = (0.420, 0.459, 0.510)    # outlines / shafts
+HEX_H, HEX_V, HEX_A = TH.hex_of(C_H), TH.hex_of(C_V), TH.hex_of(C_A)
+REL_HEX = {"in": TH.GOOD_HEX, "anti": TH.DANGER_HEX, "quad": TH.hex_of(TH.SERIES["blue"]), "mid": TH.ALERT_HEX}
 
 
 def _dir_color(pid):
@@ -3160,7 +3159,7 @@ class PhaseMapChart(_Plot):
         self.hits = []
         fan = T["driven"] == "fan"
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             Color(*C_STEEL2, 1)
             Rectangle(pos=(X(0.02), base - dp(7)), size=(X(0.98) - X(0.02), dp(7)))
@@ -3198,9 +3197,9 @@ class PhaseMapChart(_Plot):
                 Rectangle(pos=(bx - dp(9), cy - dp(13)), size=(dp(18), dp(26)))
                 Color(*ink)
                 Ellipse(pos=(bx - dp(3), cy - dp(3)), size=(dp(6), dp(6)))
-        self._label("MOTOR", (X(0.06) + X(0.40)) / 2.0, cy + dp(18), muted, 9, bold=True)
+        self._label("MOTOR", (X(0.06) + X(0.40)) / 2.0, cy + dp(18), ink, 9, bold=True)
         self._label("FAN" if fan else "PUMP", X(0.86) + dp(6) if fan else X(0.715),
-                    cy + (dp(54) if fan else dp(16)), muted, 9, bold=True)
+                    cy + (dp(54) if fan else dp(16)), muted if fan else ink, 9, bold=True)
         for i, fx in enumerate(T["x"]):
             self._label(str(i + 1), X(fx), cy - dp(22), ink, 11, bold=True)
         # clocks: A, V, H stacked above each bearing
@@ -3218,7 +3217,7 @@ class PhaseMapChart(_Plot):
         col = _dir_color(pid)
         sel = pid == s.selected
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_BG)
             Ellipse(pos=(x - r, y - r), size=(2 * r, 2 * r))
             if sel:
                 Color(*COLOR_ACCENT)
@@ -3274,7 +3273,7 @@ class ReadingChart(_Plot):
         y0 = yb + ph / 2.0
         muted = (*COLOR_TEXT_MUTED[:3], 1)
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             Color(*COLOR_BORDER)
             Line(rectangle=(x0, yb, pw, ph), width=1)
@@ -3310,7 +3309,7 @@ class ReadingChart(_Plot):
             for k in range(3):
                 xx = X(k * SPR)
                 Line(points=[xx, yb, xx, yb - dp(12)], width=dp(1.4))
-            Color(*COLOR_BORDER)
+            Color(*_rgb("grey"), 0.7)
             raw = []
             for i in range(n):
                 raw.extend([X(i), Y(s["x"][i])])
@@ -3383,7 +3382,7 @@ class OdsChart(_Plot):
                         Color(*COLOR_ACCENT)
                         Ellipse(pos=(x - dp(5), y - dp(5)), size=(dp(10), dp(10)))
                     else:
-                        Color(1, 1, 1, 1)
+                        Color(*COLOR_PLOT_BG)
                         Ellipse(pos=(x - dp(5), y - dp(5)), size=(dp(10), dp(10)))
                         Color(*COLOR_TEXT_MUTED[:3], 1)
                         Line(circle=(x, y, dp(5)), width=1)
@@ -3405,7 +3404,7 @@ class OdsChart(_Plot):
         k = dp(20) / mx if mx > 0 else 0.0
         muted = (*COLOR_TEXT_MUTED[:3], 1)
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             Color(*COLOR_GRID)
             for d, yc in strips:
@@ -3465,8 +3464,7 @@ class PhaseSurveyScreen(_ToolScreen):
         grid = GridLayout(cols=3, size_hint_y=None, height=dp(84), spacing=dp(6))
         self.extra_btns = {}
         for pid, name in phase_engine.EXTRA:
-            b = PillButton(name, accent=COLOR_ACCENT, inactive=COLOR_PANEL_BG,
-                           text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            b = PillButton(name, accent=COLOR_ACCENT)
             b.label.font_size = dp(11)
             b.label.markup = True
             b.bind(on_release=lambda i, p=pid: self._pick(p))
@@ -3476,8 +3474,7 @@ class PhaseSurveyScreen(_ToolScreen):
         grid = GridLayout(cols=2, size_hint_y=None, height=dp(84), spacing=dp(6))
         for text, fn in (("Take reading", self._take), ("Repeat 5 times", self._repeat),
                          ("Measure all points", self._measure_all), ("Clear survey", self._clear)):
-            b = PillButton(text, accent=COLOR_ACCENT, inactive=COLOR_ACCENT_SOFT,
-                           text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            b = PillButton(text, accent=COLOR_ACCENT)
             b.label.font_size = dp(12)
             b.set_active(False)
             b.bind(on_release=lambda i, f=fn: f())
@@ -3669,7 +3666,7 @@ class PhaseSurveyScreen(_ToolScreen):
             b = self.extra_btns[pid]
             b.label.text = name + ("  [b]%d[/b]" % round(self.shown(rd["lag"])) if rd else "")
             b.set_active(pid == self.selected)
-        self.banner.text = ("[color=A8291F]This survey mixes readings taken with different setups (unit, "
+        self.banner.text = ("[color=" + TH.DANGER_HEX + "]This survey mixes readings taken with different setups (unit, "
                             "tape position or axial sensor direction). Phases from different setups cannot "
                             "be compared - clear the survey or re-measure.[/color]" if sv.mixed_setup() else "")
         self._render_reading()
@@ -3785,11 +3782,10 @@ class PhaseSurveyScreen(_ToolScreen):
 # =====================================================================
 # Waveform builder tool
 # =====================================================================
-C_WAVES = [(0.153, 0.306, 0.788), (0.055, 0.561, 0.267), (0.886, 0.400, 0.055),
-           (0.502, 0.251, 0.682), (0.000, 0.533, 0.565)]
-HEX_WAVES = ["274EC9", "0E8F44", "E2660E", "8040AE", "008890"]
-C_MERGED = (0.06, 0.09, 0.16)
-C_CURSOR = (0.820, 0.180, 0.180)
+C_WAVES = [_rgb("blue"), _rgb("green"), _rgb("orange"), _rgb("purple"), _rgb("teal")]
+HEX_WAVES = [TH.hex_of(c) for c in C_WAVES]
+C_MERGED = tuple(TH.TEXT[:3])
+C_CURSOR = _rgb("red")
 
 
 def _trace(points_fn, x0, pw, y0, sc, cols, env):
@@ -3824,7 +3820,7 @@ class MiniWave(_Plot):
         cols = max(2, int(self.width / 2))
         env = wave_engine.envelope(lambda t: wave_engine.value(w.a, w.f, t), 0.0, T, cols, 4)
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             Color(*COLOR_GRID)
             Line(points=[self.x, y0, self.right, y0], width=1)
@@ -3898,7 +3894,7 @@ class MergedChart(_Plot):
         sc = ph / 2.0 / top
         muted = (*COLOR_TEXT_MUTED[:3], 1)
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
         v = -top
         while v <= top + 1e-9:
@@ -4016,7 +4012,7 @@ class OverviewStrip(_Plot):
         y0 = self.center_y
         h = self.height
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
             Color(*COLOR_BORDER)
             Line(rectangle=(x0, self.y + dp(2), pw, h - dp(4)), width=1)
@@ -4035,7 +4031,7 @@ class OverviewStrip(_Plot):
                         Color(*C_WAVES[i], 0.8)
                         Line(points=_trace(None, x0, pw, y0, sc, cols, env), width=1)
             xa, xb = x0 + pw * s.zA, x0 + pw * s.zB
-            Color(1, 1, 1, 0.65)
+            Color(*COLOR_PLOT_BG[:3], 0.65)
             Rectangle(pos=(x0, self.y + dp(3)), size=(xa - x0, h - dp(6)))
             Rectangle(pos=(xb, self.y + dp(3)), size=(x0 + pw - xb, h - dp(6)))
             Color(*COLOR_ACCENT)
@@ -4076,7 +4072,7 @@ class SpectrumChart(_Plot):
         Y = lambda a: yb + ph * a / top
         muted = (*COLOR_TEXT_MUTED[:3], 1)
         with self.canvas:
-            Color(1, 1, 1, 1)
+            Color(*COLOR_PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
         v = 0.0
         while v <= top + 1e-9:
@@ -4158,8 +4154,7 @@ class WaveformScreen(_ToolScreen):
         self._head("START FROM")
         grid = GridLayout(cols=2, size_hint_y=None, height=dp(124), spacing=dp(6))
         for k, (name, ws) in enumerate(wave_engine.PRESETS):
-            b = PillButton(name, accent=COLOR_ACCENT, inactive=COLOR_PANEL_BG,
-                           text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            b = PillButton(name, accent=COLOR_ACCENT)
             b.label.font_size = dp(12)
             b.bind(on_release=lambda i, kk=k: self._preset(kk))
             grid.add_widget(b)
@@ -4179,8 +4174,7 @@ class WaveformScreen(_ToolScreen):
                                  on_live=self._span_live)
         box.add_widget(self.s_span)
         row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(6))
-        b = PillButton("Auto length", accent=COLOR_ACCENT, inactive=COLOR_ACCENT_SOFT,
-                       text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+        b = PillButton("Auto length", accent=COLOR_ACCENT)
         b.label.font_size = dp(12)
         b.set_active(False)
         b.bind(on_release=lambda *a: self._auto_span())
@@ -4191,8 +4185,7 @@ class WaveformScreen(_ToolScreen):
         row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(6))
         for text, fn in (("Zoom in +", lambda: self.zoom_by(0.5)), ("Zoom out -", lambda: self.zoom_by(2.0)),
                          ("Show all", lambda: self.set_zoom(0.0, 1.0))):
-            b = PillButton(text, accent=COLOR_ACCENT, inactive=COLOR_ACCENT_SOFT,
-                           text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+            b = PillButton(text, accent=COLOR_ACCENT)
             b.label.font_size = dp(12)
             b.set_active(False)
             b.bind(on_release=lambda i, f=fn: f())
@@ -4272,13 +4265,13 @@ class WaveformScreen(_ToolScreen):
         sf = LazySlider("Frequency", w.f, 0, 2000, 0.5, "%.2f Hz",
                         lambda ii=i: self._freq_done(ii), on_live=lambda v, ii=i: self._freq_live(ii, v))
         box.add_widget(sf)
-        row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
+        row = BoxLayout(size_hint_y=None, height=TH.TOUCH, spacing=dp(6))
         lb = Label(text="Exact frequency, Hz", font_size=dp(11), color=COLOR_TEXT_MUTED,
                    halign="left", valign="middle")
         lb.bind(size=lambda o, v: setattr(o, "text_size", v))
         row.add_widget(lb)
-        fin = ModernInput(text=wave_engine.fmt_hz(w.f), input_filter="float", height=dp(40),
-                          panel_color=(1, 1, 1, 1), text_color=COLOR_TEXT, accent=COLOR_ACCENT,
+        fin = ModernInput(text=wave_engine.fmt_hz(w.f), input_filter="float", height=TH.TOUCH,
+                          accent=COLOR_ACCENT,
                           font_size=dp(13))
         fin.size_hint_x = None
         fin.width = dp(120)
@@ -4504,18 +4497,22 @@ MENU_SUBTITLE = "Interactive teaching tools"
 
 MENU = [
     ("balance", "Balance Demo", "Single-plane job on one screen, live vectors",
-     (0.153, 0.306, 0.788, 1)),
+     COLOR_ACCENT),
     ("fault", "Fault Signature", "Waveform and spectrum of 27 machinery faults",
-     (0.886, 0.247, 0.541, 1)),
+     COLOR_ACCENT),
     ("orbit", "Orbit", "Two probes, live orbit shape with Keyphasor dots",
-     (0.055, 0.561, 0.267, 1)),
+     COLOR_ACCENT),
     ("resonance", "Resonance", "Two criticals: Bode, shaft shape, AF and margin",
-     (0.502, 0.251, 0.682, 1)),
+     COLOR_ACCENT),
     ("phase", "Phase Survey", "Tap points, read phase, find the fault, avoid the traps",
-     (0.886, 0.400, 0.055, 1)),
+     COLOR_ACCENT),
     ("waveform", "Waveform Builder", "Five waves, merged waveform, spectrum and statistics",
-     (0.000, 0.533, 0.565, 1)),
+     COLOR_ACCENT),
 ]
+
+# line icon for each card (theme.draw_icon names; an unknown name draws a dot)
+MENU_ICONS = {"balance": "rotor", "fault": "pulse", "orbit": "orbit", "resonance": "turbine",
+              "phase": "align", "waveform": "wave"}
 
 
 class MenuScreen(Screen):
@@ -4541,18 +4538,15 @@ class MenuScreen(Screen):
             text=("Interactive teaching tools. Each one is built on the same "
                   "maths the calculators use, so nothing here can drift away "
                   "from what the rest of the app computes."),
-            markup=True, font_size=dp(12.5), color=COLOR_TEXT_MUTED,
+            markup=True, font_size=TH.FS_BODY, color=TH.TEXT_2,
             halign="left", valign="top", size_hint_y=None)
         intro.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)),
                    texture_size=lambda i, ts: setattr(i, "height", ts[1]))
         col.add_widget(intro)
 
         for name, title, subtitle, accent in MENU:
-            card = NavCard(title, subtitle, accent,
-                           card_bg=COLOR_PANEL_BG,
-                           title_color=COLOR_TEXT,
-                           subtitle_color=COLOR_TEXT_MUTED,
-                           height=dp(84))
+            card = NavCard(title, subtitle, accent, height=dp(84),
+                           icon=MENU_ICONS.get(name))
             card.bind(on_release=lambda i, n=name: on_pick(n))
             col.add_widget(card)
 
@@ -4574,14 +4568,13 @@ class RootWidget(BoxLayout):
         header = BoxLayout(orientation="horizontal", size_hint_y=None,
                            height=dp(76), padding=(dp(12), dp(12)), spacing=dp(6))
         with header.canvas.before:
-            Color(*COLOR_ACCENT)
+            Color(*COLOR_PANEL_BG)
             header._bg = Rectangle()
         header.bind(pos=lambda w, v: setattr(header._bg, "pos", v),
                     size=lambda w, v: setattr(header._bg, "size", v))
 
-        self.back_btn = PillButton("<", accent=(1, 1, 1, 0.22),
-                                   inactive=(1, 1, 1, 0.22),
-                                   text_color=(1, 1, 1, 1))
+        self.back_btn = PillButton("<", accent=COLOR_ACCENT,
+                                   inactive_text_color=COLOR_TEXT)
         self.back_btn.size_hint_x = None
         self.back_btn.width = dp(44)
         self.back_btn.bind(on_release=lambda *a: self.show_menu())
@@ -4590,11 +4583,11 @@ class RootWidget(BoxLayout):
         header.add_widget(self.back_btn)
 
         text_col = BoxLayout(orientation="vertical", spacing=dp(2))
-        self.title = Label(text="[b]Simulation[/b]", markup=True, color=(1, 1, 1, 1),
+        self.title = Label(text="[b]Simulation[/b]", markup=True, color=COLOR_TEXT,
                            font_size=dp(20), size_hint_y=None, height=dp(26),
                            halign="left", valign="middle")
         self.title.bind(size=lambda i, v: setattr(i, "text_size", v))
-        self.subtitle = Label(text=MENU_SUBTITLE, color=(1, 0.92, 0.96, 1),
+        self.subtitle = Label(text=MENU_SUBTITLE, color=TH.TEXT_2,
                               font_size=dp(12.5), size_hint_y=None, height=dp(22),
                               halign="left", valign="middle")
         self.subtitle.bind(size=lambda i, v: setattr(i, "text_size", v))
