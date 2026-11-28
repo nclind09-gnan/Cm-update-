@@ -1230,6 +1230,7 @@ class RootWidget(BoxLayout):
         back_btn = RoundedButton(text="< CM/DX Menu", accent=AMBER, height=dp(38))
         back_btn.bind(on_release=lambda *a: self.go_menu())
         self.subbar.add_widget(back_btn)
+        self.subbar.disabled = True
         self.add_widget(self.subbar)
         self.add_widget(self.sm)
 
@@ -1252,11 +1253,13 @@ class RootWidget(BoxLayout):
         else:
             self.subbar.height = dp(46)
             self.subbar.opacity = 1
+            self.subbar.disabled = False
 
     def go_menu(self):
         self.sm.current = "menu"
         self.subbar.height = 0
         self.subbar.opacity = 0
+        self.subbar.disabled = True      # invisible strip must not catch taps
         if self._bar:
             self._bar("CM/DX", "Condition monitoring diagnostics")
 
@@ -1264,6 +1267,12 @@ class RootWidget(BoxLayout):
         """Called by main.py: use the app's header bar instead of our own
         heading and '< CM/DX Menu' strip."""
         self._bar = set_bar
+        # The '< CM/DX Menu' strip is collapsed to zero height on the menu,
+        # but its button kept its own height and sat, invisible, on top of
+        # the app header's Back button - so Back did nothing on the CM/DX
+        # menu. With the app header in charge it is not needed at all.
+        if self.subbar.parent is not None:
+            self.subbar.parent.remove_widget(self.subbar)
         if self.menu.heading.parent is not None:
             self.menu.heading.parent.remove_widget(self.menu.heading)
         if self.sm.current == "menu":
