@@ -13,10 +13,13 @@ from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.uix.checkbox import CheckBox
-from kivy.uix.spinner import Spinner
+from kivy.uix.spinner import Spinner, SpinnerOption
 from kivy.uix.popup import Popup
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.properties import BooleanProperty
+from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
+import theme as T
 from theme import ModernInput, PillButton, RoundedButton, NavCard
 from kivy.core.clipboard import Clipboard
 from kivy.metrics import dp, sp
@@ -30,18 +33,20 @@ import re
 from component_data import COMPONENTS
 
 # ------------------------------------------------------------------
-# COLORS
+# COLORS - mapped onto the shared design tokens (theme.py)
 # ------------------------------------------------------------------
-BG = (0.078, 0.09, 0.102, 1)
-PANEL = (0.11, 0.129, 0.149, 1)
-BORDER = (0.17, 0.2, 0.23, 1)
-TEXT = (0.9, 0.91, 0.925, 1)
-MUTED = (0.545, 0.584, 0.631, 1)
-AMBER = (0.909, 0.639, 0.239, 1)
-TEAL = (0.31, 0.714, 0.659, 1)
-LIME = (0.561, 0.749, 0.357, 1)
-ORANGE = (0.851, 0.541, 0.239, 1)
-RED = (0.788, 0.267, 0.267, 1)
+BG = T.BG
+PANEL = T.CARD
+BORDER = T.LINE
+TEXT = T.TEXT
+TEXT_2 = T.TEXT_2
+MUTED = T.TEXT_3
+ACCENT = T.ACCENTS["cmdx"]      # the tool accent (was amber)
+AMBER = ACCENT                  # old name kept for the accent role
+TEAL = ACCENT
+LIME = T.GOOD
+ORANGE = T.ALERT
+RED = T.DANGER_TEXT
 
 # ------------------------------------------------------------------
 # KNOWLEDGE BASE
@@ -343,12 +348,14 @@ CLASS_META = {
     "III": ("Class III - Large rigid foundations", "large rotating masses on rigid, heavy foundations"),
     "IV": ("Class IV - Large soft foundations", "large prime movers on relatively soft foundations"),
 }
+# ISO 10816-1 zones: text colour (with the zone word) and the bar fill
 ZONE_INFO = {
-    "A": ("Good", TEAL, "Typical of a newly commissioned machine. Continue normal monitoring."),
-    "B": ("Acceptable", LIME, "Suitable for unrestricted long-term operation."),
-    "C": ("Unsatisfactory", ORANGE, "Generally unsatisfactory for long-term operation. Plan corrective action."),
-    "D": ("Unacceptable", RED, "Vibration severity is likely to cause damage. Investigate or shut down promptly."),
+    "A": ("Good", T.GOOD_TEXT, "Typical of a newly commissioned machine. Continue normal monitoring."),
+    "B": ("Acceptable", T.GOOD_TEXT, "Suitable for unrestricted long-term operation."),
+    "C": ("Unsatisfactory", T.ALERT_TEXT, "Generally unsatisfactory for long-term operation. Plan corrective action."),
+    "D": ("Unacceptable", T.DANGER_TEXT, "Vibration severity is likely to cause damage. Investigate or shut down promptly."),
 }
+ZONE_FILL = {"A": T.GOOD, "B": T.soft(T.GOOD, 0.55), "C": T.ALERT, "D": T.DANGER}
 
 
 def get_zone(rms, cls):
@@ -401,18 +408,185 @@ def score_faults(selected_tags, technique_filter=None):
 # SMALL UI HELPERS
 # ------------------------------------------------------------------
 
-def section_label(text, color=AMBER):
-    lbl = Label(text=text, color=color, bold=True, size_hint_y=None, height=dp(28),
-                halign="left", valign="middle")
-    lbl.bind(width=lambda inst, val: setattr(lbl, "text_size", (val, dp(28))))
+def section_label(text, color=None):
+    """Group caption (upper-case, tracked) when no colour is given; a plain
+    field label in the given colour otherwise."""
+    if color is None:
+        lbl = T.section_label(text)
+        lbl.height = dp(32)
+        lbl.valign = "bottom"
+        return lbl
+    lbl = Label(text=text, color=color, bold=True, font_size=T.FS_BODY, size_hint_y=None,
+                height=dp(28), halign="left", valign="bottom")
+    lbl.bind(width=lambda inst, val: setattr(lbl, "text_size", (val, None)))
+    lbl.bind(texture_size=lambda inst, ts: setattr(lbl, "height", max(dp(28), ts[1] + dp(6))))
     return lbl
 
 
-def body_label(text, color=TEXT):
-    lbl = Label(text=text, color=color, size_hint_y=None, halign="left", valign="top")
+def field_label(text):
+    return section_label(text, TEXT_2)
+
+
+def body_label(text, color=TEXT, markup=False, font_size=None, font_name=None):
+    lbl = Label(text=text, color=color, size_hint_y=None, halign="left", valign="top",
+                markup=markup, font_size=font_size or T.FS_BODY)
+    if font_name:
+        lbl.font_name = font_name
     lbl.bind(width=lambda inst, val: setattr(lbl, "text_size", (val, None)))
     lbl.bind(texture_size=lambda inst, val: setattr(lbl, "height", val[1] + dp(6)))
     return lbl
+
+
+class _Option(SpinnerOption):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.background_normal = ""
+        self.background_down = ""
+        self.background_color = T.RAISED
+        self.color = TEXT
+        self.font_size = T.FS_BODY
+        self.height = T.TOUCH
+
+
+def make_spinner(text, values):
+    """A Spinner on the dark tokens (field fill, hairline border)."""
+    sp_ = Spinner(text=text, values=values, size_hint_y=None, height=T.TOUCH,
+                  background_normal="", background_down="", background_color=(0, 0, 0, 0),
+                  color=TEXT, font_size=T.FS_TITLE, option_cls=_Option,
+                  halign="left", valign="middle", padding=[T.S3, 0])
+    sp_.bind(size=lambda w, s: setattr(w, "text_size", (s[0], s[1])))
+    with sp_.canvas.before:
+        Color(*BG)
+        rect = RoundedRectangle(radius=[T.R_FIELD])
+        Color(*T.FIELD_LINE)
+        line = Line(width=dp(1))
+
+    def _redraw(w, *a):
+        rect.pos, rect.size = w.pos, w.size
+        line.rounded_rectangle = (w.x, w.y, w.width, w.height, T.R_FIELD)
+    sp_.bind(pos=_redraw, size=_redraw)
+    with sp_.canvas.after:
+        Color(*T.ICON)
+        chev = Line(width=dp(1.4), cap="round", joint="round")
+
+    def _chev(w, *a):
+        cx, cy, s = w.right - dp(20), w.center_y, dp(4)
+        chev.points = [cx - s, cy + s / 2, cx, cy - s / 2, cx + s, cy + s / 2]
+    sp_.bind(pos=_chev, size=_chev)
+    return sp_
+
+
+def make_popup(title, content, size_hint):
+    return Popup(title=title, content=content, size_hint=size_hint,
+                 background="", background_color=PANEL, title_color=TEXT,
+                 title_size=T.FS_TITLE, separator_color=BORDER,
+                 overlay_color=(0, 0, 0, 0.6))
+
+
+def secondary_button(text, height=None, **kw):
+    return RoundedButton(text=text, accent=ACCENT, outline=True, text_color=TEXT,
+                         height=height, **kw)
+
+
+class TagRow(ButtonBehavior, BoxLayout):
+    """A tappable checklist row: square check box + wrapped text. Has an
+    `active` property like a CheckBox so the existing toggle code works."""
+    active = BooleanProperty(False)
+
+    def __init__(self, text, active=False, **kw):
+        super().__init__(size_hint_y=None, height=T.TOUCH, spacing=T.S3,
+                         padding=[T.S3, T.S2, T.S3, T.S2], **kw)
+        with self.canvas.before:
+            self._fill = Color(*T.soft(ACCENT, 0.0))
+            self._bg = RoundedRectangle(radius=[T.R_FIELD])
+        box = Widget(size_hint=(None, None), size=(dp(22), dp(22)))
+        anchor = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(22))
+        anchor.add_widget(Widget())
+        anchor.add_widget(box)
+        anchor.add_widget(Widget())
+        self._box = box
+        self.add_widget(anchor)
+        self.label = body_label(text, TEXT)
+        self.label.valign = "middle"
+        self.label.pos_hint = {"center_y": 0.5}
+        self.label.bind(height=self._fit)
+        self.add_widget(self.label)
+        self.bind(pos=self._redraw, size=self._redraw, active=self._redraw)
+        box.bind(pos=self._redraw)
+        self.active = active
+        self._redraw()
+
+    def _fit(self, *a):
+        self.height = max(T.TOUCH, self.label.height + T.S2 * 2)
+
+    def on_release(self):
+        self.active = not self.active
+
+    def _redraw(self, *a):
+        self._bg.pos, self._bg.size = self.pos, self.size
+        self._fill.rgba = T.soft(ACCENT, 0.12 if self.active else 0.0)
+        b = self._box
+        b.canvas.clear()
+        with b.canvas:
+            if self.active:
+                Color(*ACCENT)
+                RoundedRectangle(pos=b.pos, size=b.size, radius=[dp(5)])
+                Color(*T.ON_ACCENT)
+                x, y, s = b.x, b.y, b.width
+                Line(points=[x + s * 0.24, y + s * 0.52, x + s * 0.43, y + s * 0.32,
+                             x + s * 0.78, y + s * 0.70], width=dp(1.8), cap="round", joint="round")
+            else:
+                Color(*T.ICON)
+                Line(rounded_rectangle=(b.x, b.y, b.width, b.height, dp(5)), width=dp(1.2))
+
+
+class ListRow(ButtonBehavior, BoxLayout):
+    """A tappable list row on a card: title, optional caption, chevron."""
+
+    def __init__(self, text, caption=None, **kw):
+        super().__init__(size_hint_y=None, height=dp(56), spacing=T.S3,
+                         padding=[T.S4, T.S2, T.S3, T.S2], **kw)
+        with self.canvas.before:
+            Color(*PANEL)
+            self._bg = RoundedRectangle(radius=[T.R_CARD])
+            Color(*BORDER)
+            self._line = Line(width=dp(1))
+            self._press = Color(1, 1, 1, 0)
+            self._prect = RoundedRectangle(radius=[T.R_CARD])
+        self.bind(pos=self._redraw, size=self._redraw,
+                  state=lambda *a: setattr(self._press, "a", 0.08 if self.state == "down" else 0))
+        col = BoxLayout(orientation="vertical", size_hint_y=None)
+        self._title = body_label(text, TEXT)
+        self._title.bold = True
+        col.add_widget(self._title)
+        self._cap = None
+        if caption:
+            self._cap = body_label(caption, MUTED, font_size=T.FS_CAPTION)
+            col.add_widget(self._cap)
+        self._col = col
+        for w in (self._title, self._cap):
+            if w is not None:
+                w.bind(height=self._fit)
+        wrap = BoxLayout(orientation="vertical")
+        wrap.add_widget(Widget())
+        wrap.add_widget(col)
+        wrap.add_widget(Widget())
+        self.add_widget(wrap)
+        chev = BoxLayout(size_hint_x=None, width=dp(20), orientation="vertical")
+        chev.add_widget(Widget())
+        chev.add_widget(T.Icon("chevron", T.ICON, dp(20)))
+        chev.add_widget(Widget())
+        self.add_widget(chev)
+
+    def _fit(self, *a):
+        h = self._title.height + (self._cap.height if self._cap is not None else 0)
+        self._col.height = h
+        self.height = max(dp(56), h + T.S2 * 2 + dp(4))
+
+    def _redraw(self, *a):
+        self._bg.pos = self._prect.pos = self.pos
+        self._bg.size = self._prect.size = self.size
+        self._line.rounded_rectangle = (self.x, self.y, self.width, self.height, T.R_CARD)
 
 
 class ColorBar(Widget):
@@ -422,7 +596,7 @@ class ColorBar(Widget):
         self.class_key = class_key
         self.rms_value = rms
         self.size_hint_y = None
-        self.height = dp(18)
+        self.height = dp(14)
         self.bind(pos=self.redraw, size=self.redraw)
 
     def redraw(self, *args):
@@ -432,36 +606,68 @@ class ColorBar(Widget):
             maxv = cd * 1.4
             widths = [ab / maxv, (bc - ab) / maxv, (cd - bc) / maxv, (maxv - cd) / maxv]
             x = self.x
+            gap = dp(2)
             with self.canvas:
                 for zone, w in zip(["A", "B", "C", "D"], widths):
-                    Color(*ZONE_INFO[zone][1])
-                    Rectangle(pos=(x, self.y), size=(w * self.width, self.height))
+                    Color(*ZONE_FILL[zone])
+                    RoundedRectangle(pos=(x, self.y), size=(max(0, w * self.width - gap), self.height),
+                                     radius=[dp(3)])
                     x += w * self.width
                 if self.rms_value is not None:
                     marker_x = self.x + min(self.rms_value / maxv, 1) * self.width
+                    Color(*BG)
+                    Rectangle(pos=(marker_x - dp(3), self.y - dp(3)), size=(dp(6), self.height + dp(6)))
                     Color(*TEXT)
-                    Rectangle(pos=(marker_x - dp(1.5), self.y), size=(dp(3), self.height))
+                    Rectangle(pos=(marker_x - dp(1.5), self.y - dp(3)), size=(dp(3), self.height + dp(6)))
         except Exception as e:
             print("ColorBar redraw failed:", e)
 
 
 def result_card(score, matched, fault):
-    box = BoxLayout(orientation="vertical", size_hint_y=None, padding=dp(8), spacing=dp(4))
-    box.bind(minimum_height=box.setter("height"))
-    with box.canvas.before:
-        Color(*PANEL)
-        bg = Rectangle(pos=box.pos, size=box.size)
-    box.bind(pos=lambda i, v: setattr(bg, "pos", v), size=lambda i, v: setattr(bg, "size", v))
-
-    header_lbl = Label(text="[b]%s[/b]  (%s, %d/%d signs)" % (
-        fault["name"], fault["technique"], matched, len(fault["tags"])),
-        markup=True, color=AMBER, size_hint_y=None, height=dp(26), halign="left")
-    header_lbl.bind(width=lambda inst, val: setattr(header_lbl, "text_size", (val, dp(26))))
-    box.add_widget(header_lbl)
-    box.add_widget(body_label("Likely causes:\n- " + "\n- ".join(fault["causes"]), MUTED))
+    box = T.Card(padding=[T.S4, T.S3], spacing=T.S2)
+    box.add_widget(body_label(
+        "[b]%s[/b]\n[size=%d][color=%s]%s  |  %d/%d signs[/color][/size]" % (
+            fault["name"], int(T.FS_CAPTION), T.hex_of(ACCENT), fault["technique"],
+            matched, len(fault["tags"])),
+        TEXT, markup=True, font_size=T.FS_TITLE))
+    box.add_widget(body_label("Likely causes:\n- " + "\n- ".join(fault["causes"]), TEXT_2))
     box.add_widget(body_label("Recommendations:\n" +
                                "\n".join("%d. %s" % (i + 1, a) for i, a in enumerate(fault["actions"])), TEXT))
     return box
+
+
+def _action_bar(*buttons):
+    """Bottom action strip on the screen background with a hairline above."""
+    row = BoxLayout(size_hint_y=None, height=T.BUTTON_H + T.S2 * 2,
+                    padding=[T.S4, T.S2], spacing=T.S2)
+    with row.canvas.before:
+        Color(*BG)
+        bg = Rectangle()
+        Color(*BORDER)
+        ln = Line(width=1)
+
+    def _r(w, *a):
+        bg.pos, bg.size = w.pos, w.size
+        ln.points = [w.x, w.top, w.right, w.top]
+    row.bind(pos=_r, size=_r)
+    for b in buttons:
+        row.add_widget(b)
+    return row
+
+
+def _results_area():
+    scroll = ScrollView(size_hint_y=0.45)
+    col = GridLayout(cols=1, size_hint_y=None, spacing=T.S2, padding=[T.S4, T.S2, T.S4, T.S4])
+    col.bind(minimum_height=col.setter("height"))
+    scroll.add_widget(col)
+    return scroll, col
+
+
+def _page_col(spacing=None):
+    col = GridLayout(cols=1, size_hint_y=None, spacing=spacing if spacing is not None else T.S2,
+                     padding=[T.S4, T.S3, T.S4, T.S4])
+    col.bind(minimum_height=col.setter("height"))
+    return col
 
 
 # ------------------------------------------------------------------
@@ -480,40 +686,30 @@ class WizardScreen(Screen):
         self.selected = set()
         root = BoxLayout(orientation="vertical")
         scroll = ScrollView()
-        col = GridLayout(cols=1, size_hint_y=None, spacing=dp(4), padding=dp(10))
-        col.bind(minimum_height=col.setter("height"))
+        col = _page_col(spacing=dp(2))
 
         col.add_widget(body_label(
-            "Check every observation that applies. Then tap Diagnose.", MUTED))
+            "Check every observation that applies. Then tap Diagnose.", TEXT_2))
 
         self.checks = {}
         for title, tags in TAG_GROUPS:
             col.add_widget(section_label(title))
             for t in tags:
-                row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
-                cb = CheckBox(size_hint_x=None, width=dp(40))
+                cb = TagRow(TAGS[t])
                 cb.bind(active=self.make_toggle(t))
                 self.checks[t] = cb
-                row.add_widget(cb)
-                row.add_widget(body_label(TAGS[t]))
-                col.add_widget(row)
+                col.add_widget(cb)
 
         scroll.add_widget(col)
         root.add_widget(scroll)
 
-        btn_row = BoxLayout(size_hint_y=None, height=dp(48), padding=dp(6), spacing=dp(6))
-        diag_btn = RoundedButton(text="Diagnose", accent=AMBER)
+        diag_btn = RoundedButton(text="Diagnose", accent=ACCENT)
         diag_btn.bind(on_release=self.diagnose)
-        clear_btn = RoundedButton(text="Clear", accent=PANEL)
+        clear_btn = secondary_button("Clear")
         clear_btn.bind(on_release=self.clear_all)
-        btn_row.add_widget(diag_btn)
-        btn_row.add_widget(clear_btn)
-        root.add_widget(btn_row)
+        root.add_widget(_action_bar(diag_btn, clear_btn))
 
-        self.results_scroll = ScrollView(size_hint_y=0.45)
-        self.results_col = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
-        self.results_col.bind(minimum_height=self.results_col.setter("height"))
-        self.results_scroll.add_widget(self.results_col)
+        self.results_scroll, self.results_col = _results_area()
         root.add_widget(self.results_scroll)
 
         self.add_widget(root)
@@ -563,28 +759,23 @@ class SpectrumScreen(Screen):
 
         root = BoxLayout(orientation="vertical")
         scroll = ScrollView()
-        col = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(10))
-        col.bind(minimum_height=col.setter("height"))
+        col = _page_col()
 
-        col.add_widget(body_label("Enter the spectrum reading, then tap Diagnose.", MUTED))
+        col.add_widget(body_label("Enter the spectrum reading, then tap Diagnose.", TEXT_2))
 
         self.amp1x = self._num_field(col, "1x amplitude (mm/s)")
         self.amp2x = self._num_field(col, "2x amplitude (mm/s)")
         self.amp3x = self._num_field(col, "3x+ amplitude (mm/s)")
         self.rms = self._num_field(col, "Overall velocity RMS (mm/s)")
 
-        col.add_widget(section_label("Machine class"))
-        self.cls_spinner = Spinner(text="II", values=list(CLASS_BOUNDARIES.keys()),
-                                    size_hint_y=None, height=dp(40))
+        col.add_widget(field_label("Machine class"))
+        self.cls_spinner = make_spinner("II", list(CLASS_BOUNDARIES.keys()))
         col.add_widget(self.cls_spinner)
 
         col.add_widget(section_label("Additional signature present"))
         self.toggle_buttons = {}
         for t in self.toggle_tags:
-            b = PillButton(self.toggle_labels[t], accent=AMBER, inactive=PANEL,
-                            text_color=(1, 1, 1, 1), inactive_text_color=TEXT,
-                            size_hint_y=None, height=dp(40))
-            b.label.font_size = sp(12)
+            b = PillButton(self.toggle_labels[t], ACCENT, size_hint_y=None, height=T.TOUCH)
             b.set_active(False)
             b.bind(on_release=self.make_flip(t))
             self.toggle_buttons[t] = b
@@ -593,22 +784,18 @@ class SpectrumScreen(Screen):
         scroll.add_widget(col)
         root.add_widget(scroll)
 
-        btn = RoundedButton(text="Diagnose", accent=AMBER, height=dp(48))
+        btn = RoundedButton(text="Diagnose", accent=ACCENT)
         btn.bind(on_release=self.diagnose)
-        root.add_widget(btn)
+        root.add_widget(_action_bar(btn))
 
-        self.results_scroll = ScrollView(size_hint_y=0.45)
-        self.results_col = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
-        self.results_col.bind(minimum_height=self.results_col.setter("height"))
-        self.results_scroll.add_widget(self.results_col)
+        self.results_scroll, self.results_col = _results_area()
         root.add_widget(self.results_scroll)
 
         self.add_widget(root)
 
     def _num_field(self, col, label):
-        col.add_widget(section_label(label, MUTED))
-        ti = ModernInput(text="0", multiline=False, height=dp(42), input_filter="float",
-                          panel_color=PANEL, text_color=TEXT, accent=AMBER)
+        col.add_widget(field_label(label))
+        ti = ModernInput(text="0", multiline=False, input_filter="float", accent=ACCENT, mono=True)
         col.add_widget(ti)
         return ti
 
@@ -645,9 +832,14 @@ class SpectrumScreen(Screen):
             cls = self.cls_spinner.text
             zone = get_zone(rms, cls)
             label, color, desc = ZONE_INFO[zone]
-            self.results_col.add_widget(body_label(
-                "ISO 10816-1 severity (Class %s): Zone %s - %s\n%s" % (cls, zone, label, desc), color))
-            self.results_col.add_widget(ColorBar(cls, rms))
+            sev = T.Card(padding=[T.S4, T.S3], spacing=T.S2)
+            sev.add_widget(body_label(
+                "[b]ISO 10816-1 severity (Class %s): Zone %s - %s[/b]" % (cls, zone, label),
+                color, markup=True, font_size=T.FS_TITLE))
+            sev.add_widget(body_label(desc, TEXT_2))
+            sev.add_widget(ColorBar(cls, rms))
+            sev.add_widget(Widget(size_hint_y=None, height=dp(2)))
+            self.results_col.add_widget(sev)
 
         results = score_faults(tags, "Vibration")
         if not results:
@@ -668,18 +860,19 @@ class LibraryScreen(Screen):
         self._built = True
         root = BoxLayout(orientation="vertical")
 
-        search_row = BoxLayout(size_hint_y=None, height=dp(46), padding=dp(6), spacing=dp(6))
-        self.search = ModernInput(hint_text="Search faults...", multiline=False, height=dp(44),
-                                   panel_color=PANEL, text_color=TEXT, accent=AMBER)
+        search_row = BoxLayout(size_hint_y=None, height=T.TOUCH + T.S3 * 2,
+                               padding=[T.S4, T.S3, T.S4, T.S3], spacing=T.S2)
+        self.search = ModernInput(hint_text="Search faults...", multiline=False, accent=ACCENT)
         self.search.ti.bind(text=self.refresh)
         search_row.add_widget(self.search)
-        add_btn = RoundedButton(text="+ Add", accent=AMBER, size_hint_x=None, width=dp(90), height=dp(44))
+        add_btn = RoundedButton(text="+ Add", accent=ACCENT, size_hint_x=None, width=dp(96),
+                                height=T.TOUCH)
         add_btn.bind(on_release=lambda *a: self.open_form())
         search_row.add_widget(add_btn)
         root.add_widget(search_row)
 
         self.scroll = ScrollView()
-        self.col = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(8))
+        self.col = GridLayout(cols=1, size_hint_y=None, spacing=T.S2, padding=[T.S4, 0, T.S4, T.S4])
         self.col.bind(minimum_height=self.col.setter("height"))
         self.scroll.add_widget(self.col)
         root.add_widget(self.scroll)
@@ -693,36 +886,33 @@ class LibraryScreen(Screen):
         for f in FAULTS:
             if query and query not in f["name"].lower():
                 continue
-            btn = PillButton("%s  [%s]" % (f["name"], f["technique"]), accent=AMBER, inactive=PANEL,
-                              text_color=(1, 1, 1, 1), inactive_text_color=TEXT,
-                              size_hint_y=None, height=dp(44))
-            btn.label.font_size = sp(13)
+            btn = ListRow(f["name"], f["technique"])
             btn.bind(on_release=self.make_open(f))
             self.col.add_widget(btn)
 
     def make_open(self, fault):
         def _open(*a):
-            content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
+            content = BoxLayout(orientation="vertical", padding=T.S3, spacing=T.S3)
             sc = ScrollView()
-            inner = GridLayout(cols=1, size_hint_y=None, spacing=dp(6))
+            inner = GridLayout(cols=1, size_hint_y=None, spacing=T.S3)
             inner.bind(minimum_height=inner.setter("height"))
             sig_text = ("- " + "\n- ".join(TAGS.get(t, t) for t in fault["tags"])
                         if fault["tags"] else "(custom entry - no auto-match signature)")
             inner.add_widget(body_label("Signature:\n" + sig_text))
-            inner.add_widget(body_label("Likely causes:\n- " + "\n- ".join(fault["causes"])))
+            inner.add_widget(body_label("Likely causes:\n- " + "\n- ".join(fault["causes"]), TEXT_2))
             inner.add_widget(body_label("Recommendations:\n" +
                                          "\n".join("%d. %s" % (i + 1, x) for i, x in enumerate(fault["actions"]))))
             sc.add_widget(inner)
             content.add_widget(sc)
 
-            btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
-            edit_btn = RoundedButton(text="Edit", accent=TEAL)
-            close = RoundedButton(text="Close", accent=PANEL)
+            btn_row = BoxLayout(size_hint_y=None, height=T.BUTTON_H, spacing=T.S2)
+            edit_btn = RoundedButton(text="Edit", accent=ACCENT)
+            close = secondary_button("Close")
             btn_row.add_widget(edit_btn)
             btn_row.add_widget(close)
             content.add_widget(btn_row)
 
-            popup = Popup(title=fault["name"], content=content, size_hint=(0.92, 0.85))
+            popup = make_popup(fault["name"], content, (0.92, 0.85))
             close.bind(on_release=popup.dismiss)
 
             def _edit(*a):
@@ -735,35 +925,31 @@ class LibraryScreen(Screen):
     def open_form(self, fault=None):
         """Add/Edit form. fault=None means adding a brand-new entry."""
         is_edit = fault is not None
-        content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
+        content = BoxLayout(orientation="vertical", padding=T.S3, spacing=T.S3)
         sc = ScrollView()
-        inner = GridLayout(cols=1, size_hint_y=None, spacing=dp(6))
+        inner = GridLayout(cols=1, size_hint_y=None, spacing=T.S2)
         inner.bind(minimum_height=inner.setter("height"))
 
-        inner.add_widget(section_label("Fault name", MUTED))
-        name_in = ModernInput(text=fault["name"] if is_edit else "", multiline=False,
-                               height=dp(42), panel_color=PANEL, text_color=TEXT, accent=TEAL)
+        inner.add_widget(field_label("Fault name"))
+        name_in = ModernInput(text=fault["name"] if is_edit else "", multiline=False, accent=ACCENT)
         inner.add_widget(name_in)
 
-        inner.add_widget(section_label("Technique", MUTED))
-        tech_spinner = Spinner(text=fault["technique"] if is_edit else "Vibration",
-                                values=["Vibration", "Oil", "Thermal", "Electrical"],
-                                size_hint_y=None, height=dp(40))
+        inner.add_widget(field_label("Technique"))
+        tech_spinner = make_spinner(fault["technique"] if is_edit else "Vibration",
+                                    ["Vibration", "Oil", "Thermal", "Electrical"])
         inner.add_widget(tech_spinner)
 
-        inner.add_widget(section_label("Likely causes (one per line)", MUTED))
+        inner.add_widget(field_label("Likely causes (one per line)"))
         causes_in = ModernInput(text="\n".join(fault["causes"]) if is_edit else "",
-                                 multiline=True, height=dp(110), panel_color=PANEL,
-                                 text_color=TEXT, accent=TEAL)
+                                 multiline=True, height=dp(112), accent=ACCENT, font_size=T.FS_BODY)
         inner.add_widget(causes_in)
 
-        inner.add_widget(section_label("Recommendations (one per line)", MUTED))
+        inner.add_widget(field_label("Recommendations (one per line)"))
         actions_in = ModernInput(text="\n".join(fault["actions"]) if is_edit else "",
-                                  multiline=True, height=dp(150), panel_color=PANEL,
-                                  text_color=TEXT, accent=TEAL)
+                                  multiline=True, height=dp(152), accent=ACCENT, font_size=T.FS_BODY)
         inner.add_widget(actions_in)
 
-        inner.add_widget(section_label("Wizard signature tags (optional)", MUTED))
+        inner.add_widget(field_label("Wizard signature tags (optional)"))
         inner.add_widget(body_label(
             "Check any observations that should auto-match this fault in the Wizard tab. "
             "Leave unchecked and it'll still be searchable in the Library, just won't "
@@ -771,14 +957,11 @@ class LibraryScreen(Screen):
         existing_tags = set(fault["tags"]) if is_edit else set()
         tag_checks = {}
         for title, tags in TAG_GROUPS:
-            inner.add_widget(section_label(title, TEAL))
+            inner.add_widget(section_label(title))
             for t in tags:
-                row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(6))
-                cb = CheckBox(size_hint_x=None, width=dp(40), active=(t in existing_tags))
+                cb = TagRow(TAGS[t], active=(t in existing_tags))
                 tag_checks[t] = cb
-                row.add_widget(cb)
-                row.add_widget(body_label(TAGS[t]))
-                inner.add_widget(row)
+                inner.add_widget(cb)
 
         if not is_edit:
             inner.add_widget(body_label(
@@ -788,15 +971,14 @@ class LibraryScreen(Screen):
         sc.add_widget(inner)
         content.add_widget(sc)
 
-        btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
-        save_btn = RoundedButton(text="Save", accent=TEAL)
-        cancel_btn = RoundedButton(text="Cancel", accent=PANEL)
+        btn_row = BoxLayout(size_hint_y=None, height=T.BUTTON_H, spacing=T.S2)
+        save_btn = RoundedButton(text="Save", accent=ACCENT)
+        cancel_btn = secondary_button("Cancel")
         btn_row.add_widget(save_btn)
         btn_row.add_widget(cancel_btn)
         content.add_widget(btn_row)
 
-        popup = Popup(title="Edit fault" if is_edit else "Add new fault",
-                       content=content, size_hint=(0.92, 0.9))
+        popup = make_popup("Edit fault" if is_edit else "Add new fault", content, (0.92, 0.9))
         cancel_btn.bind(on_release=popup.dismiss)
 
         def _save(*a):
@@ -839,14 +1021,14 @@ class ComponentsScreen(Screen):
     def _build_component_list(self):
         screen = Screen(name="__components_root")
         root = ScrollView()
-        col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(12), size_hint_y=None)
+        col = BoxLayout(orientation="vertical", spacing=T.S2, padding=[T.S4, T.S3, T.S4, T.S4],
+                        size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
         col.add_widget(body_label(
             "Reference library organized by machine component - tap one to see its "
-            "common faults, signatures, and recommendations.", MUTED))
+            "common faults, signatures, and recommendations.", TEXT_2))
         for comp_name, subtitle, faults in COMPONENTS:
-            card = NavCard(comp_name, "%s (%d faults)" % (subtitle, len(faults)), AMBER,
-                            card_bg=PANEL, title_color=TEXT, subtitle_color=MUTED, height=dp(78))
+            card = NavCard(comp_name, "%s (%d faults)" % (subtitle, len(faults)), ACCENT)
             card.bind(on_release=lambda inst, n=comp_name: self.open_component(n))
             col.add_widget(card)
         root.add_widget(col)
@@ -857,21 +1039,24 @@ class ComponentsScreen(Screen):
         screen = Screen(name=comp_name)
         root = BoxLayout(orientation="vertical")
 
-        bar = BoxLayout(size_hint_y=None, height=dp(44), padding=[dp(4), dp(4)], spacing=dp(8))
-        back_btn = RoundedButton(text="< Components", accent=PANEL, height=dp(36))
+        bar = BoxLayout(size_hint_y=None, height=T.TOUCH + T.S2 * 2,
+                        padding=[T.S4, T.S2], spacing=T.S3)
+        back_btn = secondary_button("< Components", height=T.TOUCH, size_hint_x=None, width=dp(148))
+        back_btn.label.font_size = T.FS_BODY
         back_btn.bind(on_release=lambda *a: self.open_component_list())
         bar.add_widget(back_btn)
-        bar.add_widget(body_label(comp_name))
+        name_lbl = body_label("[b]%s[/b]" % comp_name, TEXT, markup=True, font_size=T.FS_TITLE)
+        name_lbl.size_hint_y = 1
+        name_lbl.valign = "middle"
+        bar.add_widget(name_lbl)
         root.add_widget(bar)
 
         scroll = ScrollView()
-        col = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10), size_hint_y=None)
+        col = BoxLayout(orientation="vertical", spacing=T.S2, padding=[T.S4, T.S2, T.S4, T.S4],
+                        size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
         for f in faults:
-            btn = PillButton(f["name"], accent=AMBER, inactive=PANEL,
-                              text_color=(1, 1, 1, 1), inactive_text_color=TEXT,
-                              size_hint_y=None, height=dp(44))
-            btn.label.font_size = sp(13)
+            btn = ListRow(f["name"])
             btn.bind(on_release=self.make_open_fault(f))
             col.add_widget(btn)
         scroll.add_widget(col)
@@ -881,19 +1066,19 @@ class ComponentsScreen(Screen):
 
     def make_open_fault(self, fault):
         def _open(*a):
-            content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
+            content = BoxLayout(orientation="vertical", padding=T.S3, spacing=T.S3)
             sc = ScrollView()
-            inner = GridLayout(cols=1, size_hint_y=None, spacing=dp(6))
+            inner = GridLayout(cols=1, size_hint_y=None, spacing=T.S3)
             inner.bind(minimum_height=inner.setter("height"))
             inner.add_widget(body_label("Signature:\n" + fault["signature"]))
-            inner.add_widget(body_label("Likely causes:\n- " + "\n- ".join(fault["causes"])))
+            inner.add_widget(body_label("Likely causes:\n- " + "\n- ".join(fault["causes"]), TEXT_2))
             inner.add_widget(body_label("Recommendations:\n" +
                                          "\n".join("%d. %s" % (i + 1, x) for i, x in enumerate(fault["actions"]))))
             sc.add_widget(inner)
             content.add_widget(sc)
-            close = RoundedButton(text="Close", accent=PANEL)
+            close = secondary_button("Close")
             content.add_widget(close)
-            popup = Popup(title=fault["name"], content=content, size_hint=(0.92, 0.85))
+            popup = make_popup(fault["name"], content, (0.92, 0.85))
             close.bind(on_release=popup.dismiss)
             popup.open()
         return _open
@@ -916,28 +1101,28 @@ class SeverityScreen(Screen):
         self._built = True
         root = BoxLayout(orientation="vertical")
         scroll = ScrollView()
-        col = GridLayout(cols=1, size_hint_y=None, spacing=dp(8), padding=dp(10))
-        col.bind(minimum_height=col.setter("height"))
+        col = _page_col()
 
         col.add_widget(body_label(
             "ISO 10816/20816 velocity severity zones (RMS, mm/s). "
-            "A = good, B = acceptable, C = unsatisfactory, D = unacceptable.", MUTED))
+            "A = good, B = acceptable, C = unsatisfactory, D = unacceptable.", TEXT_2))
 
-        col.add_widget(section_label("Overall velocity RMS (mm/s)", MUTED))
-        self.rms = ModernInput(text="2.8", multiline=False, height=dp(42), input_filter="float",
-                                panel_color=PANEL, text_color=TEXT, accent=AMBER)
+        col.add_widget(field_label("Overall velocity RMS (mm/s)"))
+        self.rms = ModernInput(text="2.8", multiline=False, input_filter="float", accent=ACCENT,
+                               mono=True)
         col.add_widget(self.rms)
 
-        col.add_widget(section_label("Machine class", MUTED))
-        self.cls_spinner = Spinner(text="II", values=list(CLASS_BOUNDARIES.keys()),
-                                    size_hint_y=None, height=dp(40))
+        col.add_widget(field_label("Machine class"))
+        self.cls_spinner = make_spinner("II", list(CLASS_BOUNDARIES.keys()))
         col.add_widget(self.cls_spinner)
 
-        btn = RoundedButton(text="Calculate", accent=AMBER, height=dp(44))
+        col.add_widget(Widget(size_hint_y=None, height=T.S1))
+        btn = RoundedButton(text="Calculate", accent=ACCENT)
         btn.bind(on_release=self.calculate)
         col.add_widget(btn)
+        col.add_widget(Widget(size_hint_y=None, height=T.S1))
 
-        self.output = GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
+        self.output = GridLayout(cols=1, size_hint_y=None, spacing=T.S3)
         self.output.bind(minimum_height=self.output.setter("height"))
         col.add_widget(self.output)
 
@@ -955,20 +1140,28 @@ class SeverityScreen(Screen):
         sel_cls = self.cls_spinner.text
         zone = get_zone(rms, sel_cls)
         label, color, desc = ZONE_INFO[zone]
-        self.output.add_widget(Label(text="[b]Result: Zone %s - %s[/b]" % (zone, label),
-                                      markup=True, color=color, size_hint_y=None, height=dp(30)))
-        self.output.add_widget(body_label(desc, TEXT))
+        res = T.Card(padding=[T.S4, T.S3], spacing=T.S1)
+        res.add_widget(body_label("RESULT", MUTED, font_size=T.FS_CAPTION))
+        res.add_widget(body_label("[b]Zone %s - %s[/b]" % (zone, label), color, markup=True,
+                                  font_size=T.FS_HEADER))
+        res.add_widget(body_label(desc, TEXT))
+        self.output.add_widget(res)
 
         for cls in CLASS_BOUNDARIES:
             title, subtitle = CLASS_META[cls]
             hi = (cls == sel_cls)
-            self.output.add_widget(section_label(title, AMBER if hi else MUTED))
-            self.output.add_widget(body_label(subtitle, MUTED))
+            card = T.Card(border=ACCENT if hi else None, padding=[T.S4, T.S3], spacing=dp(2))
+            card.add_widget(body_label("[b]%s[/b]" % title, ACCENT if hi else TEXT, markup=True,
+                                       font_size=T.FS_TITLE))
+            card.add_widget(body_label(subtitle, MUTED))
             for z in ["A", "B", "C", "D"]:
                 l, c, _ = ZONE_INFO[z]
-                self.output.add_widget(body_label(
-                    "  %s: %s mm/s (%s)" % (z, zone_range_label(cls, z), l), c))
-            self.output.add_widget(ColorBar(cls, rms if hi else None))
+                card.add_widget(body_label(
+                    "%s: %s mm/s (%s)" % (z, zone_range_label(cls, z), l), c, font_name=T.MONO))
+            card.add_widget(Widget(size_hint_y=None, height=T.S1))
+            card.add_widget(ColorBar(cls, rms if hi else None))
+            card.add_widget(Widget(size_hint_y=None, height=T.S1))
+            self.output.add_widget(card)
 
         self.output.add_widget(body_label(
             "Figures are general guidance from ISO 10816-1 (Annex B, machine Classes I-IV). Confirm against the current "
@@ -993,90 +1186,75 @@ class ReportScreen(Screen):
 
         root = BoxLayout(orientation="vertical")
         scroll = ScrollView()
-        col = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(10))
-        col.bind(minimum_height=col.setter("height"))
+        col = _page_col()
 
-        col.add_widget(section_label("Equipment tag", MUTED))
-        self.tag = ModernInput(multiline=False, height=dp(42), panel_color=PANEL,
-                                text_color=TEXT, accent=AMBER)
+        col.add_widget(field_label("Equipment tag"))
+        self.tag = ModernInput(multiline=False, accent=ACCENT)
         col.add_widget(self.tag)
 
-        col.add_widget(section_label("Equipment type", MUTED))
-        self.eq_type = Spinner(text="Motor", values=self.EQUIPMENT_TYPES, size_hint_y=None, height=dp(40))
+        col.add_widget(field_label("Equipment type"))
+        self.eq_type = make_spinner("Motor", self.EQUIPMENT_TYPES)
         col.add_widget(self.eq_type)
 
-        col.add_widget(section_label("Bearing position", MUTED))
-        self.bearing_pos = ModernInput(text="NDE", multiline=False, height=dp(42),
-                                        panel_color=PANEL, text_color=TEXT, accent=AMBER)
+        col.add_widget(field_label("Bearing position"))
+        self.bearing_pos = ModernInput(text="NDE", multiline=False, accent=ACCENT)
         col.add_widget(self.bearing_pos)
 
-        col.add_widget(section_label("Vibration status", MUTED))
-        self.vib_status = Spinner(text="Within allowable limits",
-                                   values=["Within allowable limits", "High"],
-                                   size_hint_y=None, height=dp(40))
+        col.add_widget(field_label("Vibration status"))
+        self.vib_status = make_spinner("Within allowable limits", ["Within allowable limits", "High"])
         col.add_widget(self.vib_status)
 
-        col.add_widget(section_label("Overall vibration (mm/s)", MUTED))
-        self.overall_vib = ModernInput(multiline=False, height=dp(42), input_filter="float",
-                                        panel_color=PANEL, text_color=TEXT, accent=AMBER)
+        col.add_widget(field_label("Overall vibration (mm/s)"))
+        self.overall_vib = ModernInput(multiline=False, input_filter="float", accent=ACCENT, mono=True)
         col.add_widget(self.overall_vib)
 
-        col.add_widget(section_label("Dominant frequency (Hz)", MUTED))
-        self.dom_freq = ModernInput(multiline=False, height=dp(42), input_filter="float",
-                                     panel_color=PANEL, text_color=TEXT, accent=AMBER)
+        col.add_widget(field_label("Dominant frequency (Hz)"))
+        self.dom_freq = ModernInput(multiline=False, input_filter="float", accent=ACCENT, mono=True)
         col.add_widget(self.dom_freq)
 
-        col.add_widget(section_label("Order", MUTED))
-        self.dom_order = Spinner(text="1X", values=["1X", "2X", "3X", "Non-synchronous"],
-                                  size_hint_y=None, height=dp(40))
+        col.add_widget(field_label("Order"))
+        self.dom_order = make_spinner("1X", ["1X", "2X", "3X", "Non-synchronous"])
         col.add_widget(self.dom_order)
 
-        col.add_widget(section_label("Additional technology note", MUTED))
-        self.tech_note = ModernInput(multiline=True, height=dp(64), panel_color=PANEL,
-                                      text_color=TEXT, accent=AMBER)
+        col.add_widget(field_label("Additional technology note"))
+        self.tech_note = ModernInput(multiline=True, height=dp(72), accent=ACCENT, font_size=T.FS_BODY)
         col.add_widget(self.tech_note)
 
-        col.add_widget(section_label("Physical inspection", MUTED))
+        col.add_widget(section_label("Physical inspection"))
         self.sound_buttons = {}
         for s in self.SOUND_SOURCES:
-            b = PillButton("Sound: %s" % s, accent=AMBER, inactive=PANEL,
-                            text_color=(1, 1, 1, 1), inactive_text_color=TEXT,
-                            size_hint_y=None, height=dp(38))
+            b = PillButton("Sound: %s" % s, ACCENT, size_hint_y=None, height=T.TOUCH)
             b.bind(on_release=self.make_sound_flip(s))
             self.sound_buttons[s] = b
             col.add_widget(b)
-        self.struct_btn = PillButton("Structural damage at base", accent=AMBER, inactive=PANEL,
-                                      text_color=(1, 1, 1, 1), inactive_text_color=TEXT,
-                                      size_hint_y=None, height=dp(38))
+        self.struct_btn = PillButton("Structural damage at base", ACCENT, size_hint_y=None,
+                                     height=T.TOUCH)
         self.struct_btn.bind(on_release=self.flip_structural)
         col.add_widget(self.struct_btn)
 
-        col.add_widget(section_label("Extra note", MUTED))
-        self.extra_note = ModernInput(multiline=True, height=dp(64), panel_color=PANEL,
-                                       text_color=TEXT, accent=AMBER)
+        col.add_widget(field_label("Extra note"))
+        self.extra_note = ModernInput(multiline=True, height=dp(72), accent=ACCENT, font_size=T.FS_BODY)
         col.add_widget(self.extra_note)
 
-        col.add_widget(section_label("Problem(s) identified - pick up to 2", MUTED))
+        col.add_widget(section_label("Problem(s) identified - pick up to 2"))
         self.fault_checks = {}
         for f in FAULTS:
-            row = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
-            cb = CheckBox(size_hint_x=None, width=dp(40))
+            cb = TagRow(f["name"])
             cb.bind(active=self.make_fault_toggle(f["id"]))
             self.fault_checks[f["id"]] = cb
-            row.add_widget(cb)
-            row.add_widget(body_label(f["name"]))
-            col.add_widget(row)
+            col.add_widget(cb)
 
-        gen_btn = RoundedButton(text="Generate report", accent=AMBER, height=dp(46))
+        col.add_widget(Widget(size_hint_y=None, height=T.S2))
+        gen_btn = RoundedButton(text="Generate report", accent=ACCENT)
         gen_btn.bind(on_release=self.generate)
         col.add_widget(gen_btn)
 
-        col.add_widget(section_label("Report preview", MUTED))
+        col.add_widget(section_label("Report preview"))
         self.output = ModernInput(text="", readonly=True, multiline=True, height=dp(300),
-                                   panel_color=PANEL, text_color=TEXT, accent=AMBER)
+                                  accent=ACCENT, font_size=T.FS_BODY)
         col.add_widget(self.output)
 
-        copy_btn = RoundedButton(text="Copy report", accent=PANEL, height=dp(44))
+        copy_btn = secondary_button("Copy report")
         copy_btn.bind(on_release=self.copy_report)
         col.add_widget(copy_btn)
 
@@ -1105,7 +1283,6 @@ class ReportScreen(Screen):
                 if fid in self.selected_faults:
                     self.selected_faults.remove(fid)
         return _toggle
-
     def generate(self, *a):
         eq = self.eq_type.text.lower()
         tag = self.tag.text.strip()
@@ -1151,6 +1328,7 @@ class ReportScreen(Screen):
                     lines.append("   %s" % act)
 
         self.output.text = "\n".join(lines)
+        self.output.ti.cursor = (0, 0)   # show the report from its first line
 
     def copy_report(self, *a):
         Clipboard.copy(self.output.text)
@@ -1173,6 +1351,8 @@ class MenuScreen(Screen):
         ("severity", "Severity", "ISO 10816-style vibration severity classification"),
         ("report", "Report", "Build a shareable diagnosis report for an asset"),
     ]
+    ICONS = {"wizard": "dot", "spectrum": "wave", "library": "book",
+             "components": "bearing", "severity": "pulse", "report": "dot"}
 
     def __init__(self, on_pick, **kwargs):
         super().__init__(name="menu", **kwargs)
@@ -1182,16 +1362,18 @@ class MenuScreen(Screen):
         self.bind(pos=self._redraw, size=self._redraw)
 
         root = ScrollView()
-        col = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(14), size_hint_y=None)
+        col = BoxLayout(orientation="vertical", spacing=T.S2, padding=[T.S4, T.S3, T.S4, T.S4],
+                        size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
 
+        # only shown when run standalone; main.py's header replaces it
         self.heading = Label(text="[b]CM/DX[/b]  condition monitoring diagnostics", markup=True,
-                             color=TEXT, size_hint_y=None, height=dp(36))
+                             color=TEXT, font_size=T.FS_TITLE, size_hint_y=None, height=dp(40))
         col.add_widget(self.heading)
 
+        col.add_widget(section_label("Sections"))
         for name, title, subtitle in self.SECTIONS:
-            card = NavCard(title, subtitle, AMBER, card_bg=PANEL,
-                            title_color=TEXT, subtitle_color=MUTED, height=dp(84))
+            card = NavCard(title, subtitle, ACCENT, icon=self.ICONS.get(name, "dot"))
             card.bind(on_release=lambda inst, n=name: on_pick(n))
             col.add_widget(card)
 
@@ -1206,6 +1388,11 @@ class MenuScreen(Screen):
 class RootWidget(BoxLayout):
     def __init__(self, **kw):
         super().__init__(orientation="vertical", **kw)
+        with self.canvas.before:
+            Color(*BG)
+            self._root_bg = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=lambda w, v: setattr(self._root_bg, "pos", v),
+                  size=lambda w, v: setattr(self._root_bg, "size", v))
 
         self._bar = None
         self.sm = ScreenManager(transition=NoTransition())
@@ -1221,19 +1408,20 @@ class RootWidget(BoxLayout):
         # subbar is only visible while inside a section (not on the menu);
         # collapsed to zero height/opacity when on the menu itself
         self.subbar = BoxLayout(size_hint_y=None, height=0, opacity=0,
-                                 padding=[dp(4), dp(4)], spacing=dp(8))
+                                 padding=[T.S4, T.S1], spacing=T.S2)
         with self.subbar.canvas.before:
-            Color(*PANEL)
+            Color(*BG)
             self._subbar_bg = Rectangle(pos=self.subbar.pos, size=self.subbar.size)
         self.subbar.bind(pos=lambda w, v: setattr(self._subbar_bg, "pos", v),
                           size=lambda w, v: setattr(self._subbar_bg, "size", v))
-        back_btn = RoundedButton(text="< CM/DX Menu", accent=AMBER, height=dp(38))
+        back_btn = secondary_button("< CM/DX Menu", height=dp(44))
         back_btn.bind(on_release=lambda *a: self.go_menu())
         self.subbar.add_widget(back_btn)
+        self.subbar.disabled = True
         self.add_widget(self.subbar)
         self.add_widget(self.sm)
 
-        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=dp(12),
+        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=T.FS_CAPTION,
                        size_hint_y=None, height=dp(24))
         self.add_widget(footer)
 
@@ -1250,13 +1438,15 @@ class RootWidget(BoxLayout):
             title = dict((n, t) for n, t, _ in MenuScreen.SECTIONS).get(screen_name, "CM/DX")
             self._bar("CM/DX  >  " + title, "")
         else:
-            self.subbar.height = dp(46)
+            self.subbar.height = dp(52)
             self.subbar.opacity = 1
+            self.subbar.disabled = False
 
     def go_menu(self):
         self.sm.current = "menu"
         self.subbar.height = 0
         self.subbar.opacity = 0
+        self.subbar.disabled = True
         if self._bar:
             self._bar("CM/DX", "Condition monitoring diagnostics")
 
@@ -1264,6 +1454,10 @@ class RootWidget(BoxLayout):
         """Called by main.py: use the app's header bar instead of our own
         heading and '< CM/DX Menu' strip."""
         self._bar = set_bar
+        # the collapsed strip's button sat invisibly over the header Back
+        # button and swallowed taps, so drop the strip entirely here
+        if self.subbar.parent is not None:
+            self.subbar.parent.remove_widget(self.subbar)
         if self.menu.heading.parent is not None:
             self.menu.heading.parent.remove_widget(self.menu.heading)
         if self.sm.current == "menu":
@@ -1287,16 +1481,17 @@ class RootWidget(BoxLayout):
         return False
 
     def show_error(self, message):
-        content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(6))
+        content = BoxLayout(orientation="vertical", padding=T.S3, spacing=T.S3)
         sc = ScrollView()
-        lbl = Label(text=message, color=RED, size_hint_y=None, halign="left", valign="top")
+        lbl = Label(text=message, color=T.DANGER_TEXT, font_size=T.FS_CAPTION, font_name=T.MONO,
+                    size_hint_y=None, halign="left", valign="top")
         lbl.bind(texture_size=lambda inst, val: setattr(lbl, "height", val[1]))
         lbl.bind(width=lambda inst, val: setattr(lbl, "text_size", (val, None)))
         sc.add_widget(lbl)
         content.add_widget(sc)
-        close = RoundedButton(text="Close", accent=PANEL, height=dp(44))
+        close = secondary_button("Close")
         content.add_widget(close)
-        popup = Popup(title="Error building this tab", content=content, size_hint=(0.95, 0.85))
+        popup = make_popup("Error building this tab", content, (0.95, 0.85))
         close.bind(on_release=popup.dismiss)
         popup.open()
 

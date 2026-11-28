@@ -19,9 +19,11 @@ from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.textinput import TextInput
-from kivy.uix.spinner import Spinner
+from kivy.uix.spinner import Spinner, SpinnerOption
 from kivy.uix.widget import Widget
+from kivy.core.text import Label as CoreLabel
 from kivy.graphics import Color, Rectangle, Line, RoundedRectangle
+import theme as T
 from theme import ModernInput, RoundedButton, PillButton
 
 _IMPORT_ERROR = None
@@ -32,19 +34,20 @@ except Exception:
     DATA = {"data": {}, "labels": {}}  # placeholder so the rest of the file can still load
 
 # ---------------------------------------------------------------- palette --
-WHITE = (1, 1, 1, 1)
-BG = (0.957, 0.969, 0.984, 1)       # #F4F7FB
-PANEL_BORDER = (0.886, 0.906, 0.941, 1)  # #E2E8F0
-TEXT = (0.059, 0.09, 0.165, 1)      # #0F172A
-MUTED = (0.58, 0.639, 0.722, 1)     # #94A3B8
-BLUE = (0.145, 0.388, 0.922, 1)     # #2563EB
-BLUE_BG = (0.914, 0.933, 0.996, 1)  # #E9EEF5
+# mapped onto the shared "field instrument dark" tokens (theme.py)
+BG = T.BG
+PANEL = T.CARD
+PANEL_BORDER = T.LINE
+TEXT = T.TEXT
+TEXT_2 = T.TEXT_2
+MUTED = T.TEXT_3
+ACCENT = T.ACCENTS["bearing"]        # amber - this tool's accent
 
 CH_COLORS = {
-    "BPFO": (0.851, 0.467, 0.024, 1),  # amber  #D97706
-    "BPFI": (0.863, 0.149, 0.149, 1),  # red    #DC2626
-    "BSF":  (0.035, 0.569, 0.698, 1),  # cyan   #0891B2
-    "FTF":  (0.486, 0.227, 0.929, 1),  # violet #7C3AED
+    "BPFO": T.SERIES["blue"],
+    "BPFI": T.SERIES["red"],
+    "BSF":  T.SERIES["green"],
+    "FTF":  T.SERIES["amber"],
 }
 CH_NAMES = {
     "BPFO": "Ball Pass Freq., Outer",
@@ -60,11 +63,17 @@ ISO_ZONES = {
     "III": {"title": "Class III \u2014 Large, rigid foundation", "bounds": (1.8, 4.5, 11.2)},
     "IV":  {"title": "Class IV \u2014 Large, soft foundation", "bounds": (2.8, 7.1, 18.0)},
 }
-ZONE_COLORS = {
-    "A": (0.063, 0.725, 0.506, 1),
-    "B": (0.639, 0.902, 0.208, 1),
-    "C": (0.976, 0.451, 0.086, 1),
-    "D": (0.973, 0.443, 0.443, 1),
+ZONE_COLORS = {          # fills / dots
+    "A": T.GOOD,
+    "B": T.GOOD,
+    "C": T.ALERT,
+    "D": T.DANGER,
+}
+ZONE_TEXT = {            # the same meaning, tuned for text on dark
+    "A": T.GOOD_TEXT,
+    "B": T.GOOD_TEXT,
+    "C": T.ALERT_TEXT,
+    "D": T.DANGER_TEXT,
 }
 ZONE_NAMES = {"A": "Good", "B": "Acceptable", "C": "Unsatisfactory", "D": "Unacceptable"}
 
@@ -86,29 +95,95 @@ def zone_for(v, bounds):
 
 
 # ------------------------------------------------------------- UI helpers --
+def _fit_value(lbl, *_):
+    """Large mono readings (e.g. "16,281.00 CPM") step down from 22 sp until
+    they fit the card, instead of being cut off."""
+    size = sp(22)
+    if lbl.width > dp(10) and lbl.text:
+        while size > sp(14):
+            core = CoreLabel(text=lbl.text, font_size=size, font_name=lbl.font_name, bold=lbl.bold)
+            core.refresh()
+            if core.texture.size[0] <= lbl.width:
+                break
+            size -= sp(1)
+    if lbl.font_size != size:
+        lbl.font_size = size
+
+
 class Card(BoxLayout):
-    """A white rounded panel with a border, used throughout the app."""
+    """A dark rounded panel with a hairline border, used throughout the app."""
 
     def __init__(self, **kwargs):
         kwargs.setdefault("orientation", "vertical")
         super().__init__(**kwargs)
         with self.canvas.before:
-            Color(*WHITE)
-            self._bg = RoundedRectangle(radius=[dp(14)])
+            Color(*PANEL)
+            self._bg = RoundedRectangle(radius=[T.R_CARD])
             Color(*PANEL_BORDER)
-            self._border = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, dp(14)), width=1)
+            self._border = Line(rounded_rectangle=(self.x, self.y, self.width, self.height, T.R_CARD),
+                                width=dp(1))
         self.bind(pos=self._update, size=self._update)
 
     def _update(self, *_):
         self._bg.pos = self.pos
         self._bg.size = self.size
-        self._border.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(14))
+        self._border.rounded_rectangle = (self.x, self.y, self.width, self.height, T.R_CARD)
+
+
+class DarkOption(SpinnerOption):
+    """A row in a Spinner's drop-down list, in the dark palette."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("background_normal", "")
+        kwargs.setdefault("background_down", "")
+        kwargs.setdefault("background_color", T.RAISED)
+        kwargs.setdefault("color", TEXT)
+        kwargs.setdefault("font_size", T.FS_BODY)
+        super().__init__(**kwargs)
+        self.height = T.TOUCH
+        with self.canvas.after:
+            Color(*PANEL_BORDER)
+            self._sep = Line(width=dp(1))
+        self.bind(pos=self._sep_draw, size=self._sep_draw)
+
+    def _sep_draw(self, *_):
+        self._sep.points = [self.x, self.y, self.x + self.width, self.y]
+
+
+class DarkSpinner(Spinner):
+    """A Spinner drawn like a ModernInput field: dark well, hairline border
+    and a small drop-down caret on the right."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("background_normal", "")
+        kwargs.setdefault("background_down", "")
+        kwargs.setdefault("background_color", (0, 0, 0, 0))
+        kwargs.setdefault("color", TEXT)
+        kwargs.setdefault("option_cls", DarkOption)
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(*T.BG)
+            self._well = RoundedRectangle(radius=[T.R_FIELD])
+            Color(*T.FIELD_LINE)
+            self._border = Line(width=dp(1))
+        with self.canvas.after:
+            Color(*T.ICON)
+            self._caret = Line(width=dp(1.6), cap="round", joint="round")
+        self.bind(pos=self._draw, size=self._draw)
+
+    def _draw(self, *_):
+        self._well.pos, self._well.size = self.pos, self.size
+        self._border.rounded_rectangle = (self.x, self.y, self.width, self.height, T.R_FIELD)
+        # computed from x/width directly: the cached `right` alias can lag
+        # behind a size event
+        cx, cy = self.x + self.width - dp(20), self.y + self.height / 2.0
+        self._caret.points = [cx - dp(5), cy + dp(3), cx, cy - dp(3), cx + dp(5), cy + dp(3)]
 
 
 class SectionLabel(Label):
     def __init__(self, **kwargs):
         kwargs.setdefault("color", MUTED)
-        kwargs.setdefault("font_size", sp(12))
+        kwargs.setdefault("font_size", T.FS_CAPTION)
         kwargs.setdefault("bold", True)
         kwargs.setdefault("size_hint_y", None)
         kwargs.setdefault("height", dp(20))
@@ -140,7 +215,7 @@ class SpectrumWidget(Widget):
     def redraw(self, *_):
         self.canvas.clear()
         with self.canvas:
-            Color(*WHITE)
+            Color(*T.PLOT_BG)
             Rectangle(pos=self.pos, size=self.size)
 
             pad_l, pad_r, pad_t, pad_b = dp(10), dp(10), dp(34), dp(62)
@@ -154,14 +229,14 @@ class SpectrumWidget(Widget):
             def xfor(order):
                 return plot_x + (order / self.max_order) * plot_w
 
-            # faint grid + 1X reference line (lightly darkened)
+            # faint grid + 1X reference line (a little brighter)
             step = 2 if self.max_order <= 20 else 4
             t = 0
             while t <= self.max_order:
-                Color(0.58, 0.639, 0.722, 1) if t == 1 else Color(0.933, 0.949, 0.969, 1)
+                Color(*T.ICON) if t == 1 else Color(*T.GRID)
                 Line(points=[xfor(t), plot_y, xfor(t), plot_y + plot_h], width=1.2 if t == 1 else 1)
                 t += 1
-            Color(*PANEL_BORDER)
+            Color(*T.FIELD_LINE)
             Line(points=[plot_x, plot_y, plot_x + plot_w, plot_y], width=1)
 
             for label, order, value_text, color in self.peaks:
@@ -214,13 +289,14 @@ class SpectrumWidget(Widget):
                               size_hint=(None, None), size=(dp(60), dp(16)),
                               pos=(x - dp(30), plot_y + h + dp(2) + name_row[i] * dp(15)))
             self.add_widget(name_lbl)
-            val_lbl = Label(text=value_text, color=color, bold=True, font_size=sp(12),
+            val_lbl = Label(text=value_text, color=color, bold=True, font_size=T.FS_CAPTION,
+                             font_name=T.MONO,
                              size_hint=(None, None), size=(dp(70), dp(16)),
                              pos=(x - dp(35), plot_y - dp(18) - min(val_row[i], 2) * dp(15)))
             self.add_widget(val_lbl)
 
         one_x = xfor(1)
-        one_lbl = Label(text="1X", color=(0.278, 0.333, 0.412, 1), bold=True, font_size=sp(12),
+        one_lbl = Label(text="1X", color=TEXT_2, bold=True, font_size=T.FS_CAPTION,
                          size_hint=(None, None), size=(dp(30), dp(16)),
                          pos=(one_x - dp(15), plot_y + plot_h - dp(14)))
         self.add_widget(one_lbl)
@@ -238,11 +314,10 @@ class CatalogTab(BoxLayout):
         card.bind(minimum_height=card.setter("height"))
 
         card.add_widget(SectionLabel(text="BRAND"))
-        self.brand_spinner = Spinner(
+        self.brand_spinner = DarkSpinner(
             text="All brands",
             values=["All brands"] + sorted(DATA["data"].keys()),
-            size_hint_y=None, height=dp(48), font_size=sp(15),
-            background_normal="", background_color=BLUE_BG, color=TEXT, bold=True,
+            size_hint_y=None, height=dp(48), font_size=sp(15), bold=True,
         )
         self.brand_spinner.bind(text=lambda *_: self.do_search())
         card.add_widget(self.brand_spinner)
@@ -250,7 +325,7 @@ class CatalogTab(BoxLayout):
         card.add_widget(SectionLabel(text="BEARING MODEL"))
         self.query_input = ModernInput(
             text="6205", multiline=False, height=dp(48),
-            font_size=sp(17), panel_color=BLUE_BG, text_color=TEXT, accent=BLUE,
+            font_size=sp(17), accent=ACCENT,
         )
         self.query_input.ti.bind(text=lambda *_: self.do_search())
         card.add_widget(self.query_input)
@@ -282,11 +357,12 @@ class CatalogTab(BoxLayout):
 
     def _result_row(self, brand, row):
         btn = Button(
-            text=f"{row[0]}   [size=12]{brand}[/size]", markup=True,
+            text=f"{row[0]}   [size=12][color={T.TEXT_3_HEX}]{brand}[/color][/size]", markup=True,
             size_hint_y=None, height=dp(38), font_size=sp(14),
-            background_normal="", background_color=(1, 1, 1, 1), color=TEXT,
-            halign="left",
+            background_normal="", background_down="", background_color=T.RAISED, color=TEXT,
+            halign="left", valign="middle", padding=[T.S3, 0],
         )
+        btn.bind(size=lambda w, s: setattr(w, "text_size", s))
         btn.bind(on_release=lambda *_: self.select(brand, row))
         return btn
 
@@ -320,13 +396,13 @@ class CustomTab(BoxLayout):
         ]
         for key, label, default in fields:
             card.add_widget(SectionLabel(text=label))
-            ti = ModernInput(text=default, multiline=False, height=dp(46),
-                              font_size=sp(15), panel_color=BLUE_BG, text_color=TEXT, accent=BLUE)
+            ti = ModernInput(text=default, multiline=False, height=dp(48),
+                              font_size=sp(15), accent=ACCENT, mono=True)
             ti.ti.bind(text=lambda *_: self.compute())
             self.inputs[key] = ti
             card.add_widget(ti)
 
-        btn = RoundedButton(text="Use this geometry", accent=BLUE, height=dp(46))
+        btn = RoundedButton(text="Use this geometry", accent=ACCENT)
         btn.bind(on_release=lambda *_: self.compute())
         card.add_widget(btn)
 
@@ -365,23 +441,23 @@ class SeverityTab(BoxLayout):
         card.bind(minimum_height=card.setter("height"))
 
         card.add_widget(SectionLabel(text="MACHINE CLASS"))
-        self.class_spinner = Spinner(
+        self.class_spinner = DarkSpinner(
             text="II", values=list(ISO_ZONES.keys()),
-            size_hint_y=None, height=dp(44), font_size=sp(15),
+            size_hint_y=None, height=dp(48), font_size=sp(15), bold=True,
         )
         self.class_spinner.bind(text=lambda *_: self.update_result())
         card.add_widget(self.class_spinner)
 
         card.add_widget(SectionLabel(text="MEASURED VELOCITY (MM/S RMS)"))
         self.velocity_input = ModernInput(
-            text="3.2", multiline=False, height=dp(46),
-            font_size=sp(15), panel_color=BLUE_BG, text_color=TEXT, accent=BLUE,
+            text="3.2", multiline=False, height=dp(48),
+            font_size=sp(15), accent=ACCENT, mono=True,
         )
         self.velocity_input.ti.bind(text=lambda *_: self.update_result())
         card.add_widget(self.velocity_input)
 
         self.result_label = Label(
-            text="", markup=True, size_hint_y=None, height=dp(60),
+            text="", markup=True, size_hint_y=None, height=dp(72),
             font_size=sp(16), halign="left", valign="middle", color=TEXT,
         )
         self.result_label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
@@ -406,14 +482,36 @@ class SeverityTab(BoxLayout):
             grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(2))
             grid.bind(minimum_height=grid.setter("height"))
             for letter, rng in rows:
-                grid.add_widget(Label(text=letter, color=ZONE_COLORS[letter], bold=True,
-                                       font_size=sp(14), size_hint_y=None, height=dp(28), halign="left"))
-                grid.add_widget(Label(text=rng, color=TEXT, font_size=sp(14),
-                                       size_hint_y=None, height=dp(28), halign="left"))
+                grid.add_widget(self._zone_cell(letter))
+                rng_lbl = Label(text=rng, color=TEXT, font_size=sp(14),
+                                font_name=T.MONO, size_hint_y=None, height=dp(32),
+                                halign="left", valign="middle")
+                rng_lbl.bind(size=lambda w, s: setattr(w, "text_size", s))
+                grid.add_widget(rng_lbl)
             ref_card.add_widget(grid)
             self.add_widget(ref_card)
 
         self.update_result()
+
+    @staticmethod
+    def _zone_cell(letter):
+        """Zone letter with a status dot and its word (never colour alone)."""
+        cell = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(32), spacing=T.S2)
+        dot = Widget(size_hint=(None, None), size=(dp(10), dp(10)))
+        with dot.canvas:
+            Color(*ZONE_COLORS[letter])
+            ell = RoundedRectangle(size=dot.size, radius=[dp(5)])
+        dot.bind(pos=lambda w, v: setattr(ell, "pos", v))
+        anchor = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(10))
+        anchor.add_widget(Widget())
+        anchor.add_widget(dot)
+        anchor.add_widget(Widget())
+        cell.add_widget(anchor)
+        lbl = Label(text=f"[b]{letter}[/b]  {ZONE_NAMES[letter]}", markup=True,
+                    color=ZONE_TEXT[letter], font_size=sp(14), halign="left", valign="middle")
+        lbl.bind(size=lambda w, s: setattr(w, "text_size", s))
+        cell.add_widget(lbl)
+        return cell
 
     def update_result(self, *_):
         try:
@@ -422,11 +520,10 @@ class SeverityTab(BoxLayout):
             v = 0
         bounds = ISO_ZONES[self.class_spinner.text]["bounds"]
         z = zone_for(v, bounds)
-        r, g, b, a = ZONE_COLORS[z]
-        hexc = "#%02x%02x%02x" % (int(r * 255), int(g * 255), int(b * 255))
+        hexc = "#" + T.hex_of(ZONE_TEXT[z])
         self.result_label.text = (
             f"[color={hexc}][b][size=28]{z}[/size][/b]  {ZONE_NAMES[z]}[/color]\n"
-            f"[color=#64748b]measured {fmt(v)} mm/s RMS[/color]"
+            f"[color=#{T.TEXT_3_HEX}]measured [font={T.MONO}]{fmt(v)}[/font] mm/s RMS[/color]"
         )
 
 
@@ -453,22 +550,25 @@ class RootUI(BoxLayout):
         self._header = header
 
         # shaft speed (shared across tabs)
-        speed_card = Card(orientation="horizontal", padding=dp(12), spacing=dp(10),
+        speed_card = Card(orientation="horizontal", padding=[dp(16), dp(8)], spacing=dp(10),
                            size_hint_y=None, height=dp(64))
-        speed_card.add_widget(Label(text="SHAFT SPEED\n(RPM)", color=MUTED, bold=True,
-                                     font_size=sp(11), halign="left"))
+        speed_lbl = Label(text="SHAFT SPEED\n(RPM)", color=MUTED, bold=True,
+                          font_size=T.FS_CAPTION, halign="left", valign="middle")
+        speed_lbl.bind(size=lambda w, s: setattr(w, "text_size", s))
+        speed_card.add_widget(speed_lbl)
         self.rpm_input = ModernInput(text="1750", multiline=False, font_size=sp(20),
-                                      text_color=BLUE, panel_color=BLUE_BG, accent=BLUE,
+                                      text_color=ACCENT, accent=ACCENT, mono=True,
                                       size_hint_x=0.5)
         self.rpm_input.ti.bind(text=lambda *_: self.refresh())
         speed_card.add_widget(self.rpm_input)
         self.add_widget(self._pad(speed_card))
-        unit_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6),
-                              padding=[dp(14), 0])
+        unit_row = BoxLayout(size_hint_y=None, height=T.TOUCH + dp(8), spacing=dp(6),
+                              padding=[dp(14), dp(8), dp(14), 0])
         self.unit_buttons = {}
         for u in ("Hz", "CPM", "Orders"):
-            b = PillButton(u, accent=BLUE, inactive=BLUE_BG,
-                            text_color=WHITE, inactive_text_color=TEXT)
+            # units are a neutral segmented control: the accent is kept
+            # for the mode tabs, the action and the results
+            b = PillButton(u, accent=T.SELECTED, text_color=TEXT)
             b.set_active(u == "Hz")
             b.bind(on_release=lambda inst, unit=u: self.set_unit(unit))
             self.unit_buttons[u] = b
@@ -477,12 +577,12 @@ class RootUI(BoxLayout):
         self.unit = "Hz"
 
         # mode switcher (segmented control)
-        seg_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6), padding=[dp(14), 0])
+        seg_row = BoxLayout(size_hint_y=None, height=T.TOUCH + dp(8), spacing=dp(6),
+                            padding=[dp(14), dp(8), dp(14), 0])
         self.mode = "catalog"
         self.seg_buttons = {}
         for key, label in (("catalog", "Catalog"), ("custom", "Custom"), ("severity", "Severity")):
-            b = PillButton(label, accent=BLUE, inactive=BLUE_BG,
-                            text_color=WHITE, inactive_text_color=TEXT)
+            b = PillButton(label, ACCENT)
             b.set_active(key == "catalog")
             b.bind(on_release=lambda inst, k=key: self.set_mode(k))
             self.seg_buttons[key] = b
@@ -497,7 +597,7 @@ class RootUI(BoxLayout):
         self.scroll.add_widget(self.body)
         self.add_widget(self.scroll)
 
-        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=sp(11),
+        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=T.FS_CAPTION,
                        size_hint_y=None, height=dp(28))
         self.add_widget(footer)
 
@@ -541,23 +641,29 @@ class RootUI(BoxLayout):
         grid.bind(minimum_height=grid.setter("height"))
         self.channel_cards = {}
         for ch in CH_ORDER:
-            c = Card(padding=dp(10), spacing=dp(2), size_hint_y=None, height=dp(112))
+            c = Card(padding=[dp(12), dp(14), dp(12), dp(10)], spacing=dp(2),
+                     size_hint_y=None, height=dp(124))
+            # the channel's colour as a short strip inside the top edge
             with c.canvas.before:
                 Color(*CH_COLORS[ch])
-                topbar = Rectangle(pos=(c.x, c.y + c.height - dp(4)), size=(c.width, dp(4)))
-            c.bind(pos=lambda inst, val, tb=topbar: setattr(tb, "pos", (inst.x, inst.y + inst.height - dp(4))),
-                   size=lambda inst, val, tb=topbar: (setattr(tb, "size", (inst.width, dp(4))),
-                                                        setattr(tb, "pos", (inst.x, inst.y + inst.height - dp(4)))))
-            name_lbl = Label(text=CH_NAMES[ch], color=MUTED, font_size=sp(10.5), bold=True,
-                              size_hint_y=None, height=dp(26), halign="left", valign="top")
+                topbar = RoundedRectangle(size=(c.width, dp(3)), radius=[dp(1.5)])
+
+            def _strip(inst, *_, tb=topbar):
+                tb.pos = (inst.x + T.R_CARD, inst.y + inst.height - dp(5))
+                tb.size = (max(0, inst.width - 2 * T.R_CARD), dp(3))
+            c.bind(pos=_strip, size=_strip)
+            name_lbl = Label(text=CH_NAMES[ch], color=MUTED, font_size=T.FS_CAPTION, bold=True,
+                              size_hint_y=None, height=dp(32), halign="left", valign="top")
             name_lbl.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
-            label_lbl = Label(text=ch, color=(0.2, 0.255, 0.333, 1), bold=True, font_size=sp(13),
+            label_lbl = Label(text=ch, color=TEXT_2, bold=True, font_size=sp(13),
                                size_hint_y=None, height=dp(18), halign="left")
             label_lbl.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
             value_lbl = Label(text="\u2014", color=CH_COLORS[ch], bold=True, font_size=sp(22),
+                               font_name=T.MONO, shorten=True, shorten_from="right",
                                size_hint_y=None, height=dp(30), halign="left")
             value_lbl.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
-            order_lbl = Label(text="", color=MUTED, font_size=sp(10.5),
+            value_lbl.bind(text=_fit_value, width=_fit_value)
+            order_lbl = Label(text="", color=MUTED, font_size=T.FS_CAPTION, font_name=T.MONO,
                                size_hint_y=None, height=dp(16), halign="left")
             order_lbl.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
             c.add_widget(name_lbl)
@@ -571,7 +677,7 @@ class RootUI(BoxLayout):
         harm_card = Card(padding=dp(10), spacing=dp(4), size_hint_y=None)
         harm_card.bind(minimum_height=harm_card.setter("height"))
         harm_card.add_widget(Label(text="HARMONICS (1\u00d7 \u2013 5\u00d7)", color=MUTED, bold=True,
-                                    font_size=sp(11), size_hint_y=None, height=dp(20), halign="left",
+                                    font_size=T.FS_CAPTION, size_hint_y=None, height=dp(20), halign="left",
                                     text_size=(Window.width - dp(52), None)))
         self.harm_grid = GridLayout(cols=6, size_hint_y=None, spacing=dp(2))
         self.harm_grid.bind(minimum_height=self.harm_grid.setter("height"))
@@ -581,7 +687,7 @@ class RootUI(BoxLayout):
         note = Label(
             text=("BPFO/BPFI/BSF/FTF are multiples of shaft running speed. "
                   "Hz = order \u00d7 (RPM \u00f7 60). CPM = order \u00d7 RPM."),
-            color=MUTED, font_size=sp(11), size_hint_y=None, height=dp(50),
+            color=MUTED, font_size=T.FS_CAPTION, size_hint_y=None, height=dp(56),
             halign="left", valign="top",
         )
         note.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
@@ -667,18 +773,26 @@ class RootUI(BoxLayout):
         # harmonics grid: header + 4 rows x (name + 1..5)
         self.harm_grid.clear_widgets()
         headers = ["Freq"] + [f"{h}\u00d7" for h in range(1, 6)]
-        for h in headers:
-            self.harm_grid.add_widget(Label(text=h, color=MUTED, bold=True, font_size=sp(11),
-                                             size_hint_y=None, height=dp(24)))
+        # the name column is kept narrow so five CPM values (up to
+        # "999,999.99") fit across a phone; values use Roboto's tabular
+        # figures, which line up like mono but are narrower than Roboto Mono
+        name_w = dp(40)
+        for i, h in enumerate(headers):
+            lbl = Label(text=h, color=MUTED, bold=True, font_size=sp(11),
+                        size_hint_y=None, height=dp(24))
+            if i == 0:
+                lbl.size_hint_x, lbl.width = None, name_w
+            self.harm_grid.add_widget(lbl)
         for ch in CH_ORDER:
             order = orders[ch]
             self.harm_grid.add_widget(Label(text=ch, color=CH_COLORS[ch], bold=True, font_size=sp(11),
-                                             size_hint_y=None, height=dp(24)))
+                                             size_hint=(None, None), width=name_w, height=dp(24)))
             for h in range(1, 6):
                 val = to_value(order, h) if order is not None else None
                 self.harm_grid.add_widget(Label(
                     text=fmt(val, 2) if val is not None else "\u2014",
-                    color=TEXT, font_size=sp(11), size_hint_y=None, height=dp(24)))
+                    color=TEXT, font_size=sp(11),
+                    size_hint_y=None, height=dp(24)))
 
 
 # ---------------------------------------------------------------- app ----

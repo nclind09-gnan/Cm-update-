@@ -27,37 +27,44 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import ScreenManager, Screen, NoTransition
 from kivy.uix.textinput import TextInput
+import theme as T
 from theme import ModernInput, PillButton, RoundedButton
 from kivy.uix.button import Button
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
-# ---------- color palette: blue UI, white background ----------
-COLOR_BG = (1, 1, 1, 1)
-COLOR_PRIMARY = (0.114, 0.306, 0.847, 1)          # #1D4ED8
-COLOR_PRIMARY_LIGHT = (0.235, 0.51, 0.965, 1)      # #3B82F6
-COLOR_TEXT = (0.06, 0.09, 0.16, 1)                 # #0F172A
-COLOR_TEXT_MUTED = (0.357, 0.392, 0.447, 1)        # #5B6472
-COLOR_PANEL_BG = (0.96, 0.97, 0.99, 1)
-COLOR_BORDER = (0.85, 0.89, 0.95, 1)
-COLOR_SUCCESS = (0.082, 0.502, 0.235, 1)           # #15803D
-COLOR_ERROR = (0.753, 0.224, 0.169, 1)             # #C0392B
-COLOR_WARNING = (0.718, 0.475, 0.122, 1)           # #B7791F
+# ---------- color palette: theme tokens, teal tool accent ----------
+COLOR_BG = T.BG
+COLOR_PRIMARY = T.ACCENTS["rotor"]                 # tool accent (teal)
+COLOR_PRIMARY_LIGHT = T.ACCENTS["rotor"]
+COLOR_TEXT = T.TEXT
+COLOR_TEXT_MUTED = T.TEXT_3
+COLOR_PANEL_BG = T.CARD
+COLOR_BORDER = T.LINE
+COLOR_SUCCESS = T.GOOD_TEXT
+COLOR_ERROR = T.DANGER_TEXT
+COLOR_WARNING = T.ALERT_TEXT
 
-PRIMARY_HEX = "1D4ED8"
-TEXT_HEX = "0F172A"
-MUTED_HEX = "5B6472"
-SUCCESS_HEX = "15803D"
-ERROR_HEX = "C0392B"
-WARNING_HEX = "B7791F"
+PRIMARY_HEX = T.hex_of(COLOR_PRIMARY)
+ACCENT_HEX = PRIMARY_HEX
+TEXT_HEX = T.TEXT_HEX
+MUTED_HEX = T.TEXT_2_HEX
+SUCCESS_HEX = T.GOOD_HEX
+ERROR_HEX = T.DANGER_HEX
+WARNING_HEX = T.ALERT_HEX
 
-# vector-diagram specific colors, matching the classic O / O+T / T triangle
-ORIGINAL_COLOR = (0.851, 0.282, 0.059)   # red-orange
-RESULTANT_COLOR = (0.086, 0.396, 0.835)  # blue
-EFFECT_COLOR = (0.055, 0.604, 0.655)     # teal
-ORIGINAL_HEX = "D9480F"
-RESULTANT_HEX = "1665D5"
-EFFECT_HEX = "0E9AA7"
+# vector-diagram specific colors, matching the classic O / O+T / T triangle,
+# tuned for a dark plot
+ORIGINAL_COLOR = T.SERIES["orange"][:3]
+RESULTANT_COLOR = T.SERIES["blue"][:3]
+EFFECT_COLOR = T.SERIES["teal"][:3]
+CORRECTION_COLOR = T.SERIES["green"][:3]
+ORIGINAL_HEX = T.hex_of(T.SERIES["orange"])
+RESULTANT_HEX = T.hex_of(T.SERIES["blue"])
+EFFECT_HEX = T.hex_of(T.SERIES["teal"])
+CORRECTION_HEX = T.hex_of(T.SERIES["green"])
+BULLET = "[font=DejaVuSans]\u25CF[/font]"   # Roboto has no U+25CF glyph
+ARROW = "[font=DejaVuSans]\u2192[/font]"    # ... nor U+2192
 
 GRAVITY = 9.80665  # m/s^2
 
@@ -278,15 +285,15 @@ class HeaderBar(BoxLayout):
             **kwargs,
         )
         with self.canvas.before:
-            Color(*COLOR_PRIMARY)
+            Color(*T.CARD)
             self.bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._update_rect, size=self._update_rect)
 
         title = Label(
             text="[b]Rotor Balance Calculator[/b]",
             markup=True,
-            color=(1, 1, 1, 1),
-            font_size=dp(20),
+            color=T.TEXT,
+            font_size=T.FS_HEADER,
             size_hint_y=None,
             height=dp(26),
             halign="left",
@@ -295,8 +302,8 @@ class HeaderBar(BoxLayout):
         title.bind(size=lambda inst, val: setattr(inst, "text_size", val))
         self.subtitle = Label(
             text="Influence coefficient method",
-            color=(0.85, 0.9, 1, 1),
-            font_size=dp(14),
+            color=T.TEXT_2,
+            font_size=T.FS_BODY,
             size_hint_y=None,
             height=dp(20),
             halign="left",
@@ -319,20 +326,20 @@ class Panel(BoxLayout):
     sections (vector diagram, rotor view, etc.)."""
 
     def __init__(self, **kwargs):
-        super().__init__(orientation="vertical", padding=dp(12), spacing=dp(8), **kwargs)
+        super().__init__(orientation="vertical", padding=T.S4, spacing=T.S2, **kwargs)
         with self.canvas.before:
             Color(*COLOR_PANEL_BG)
-            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(14)])
+            self.bg_rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[T.R_CARD])
             Color(*COLOR_BORDER)
             self.border_line = Line(
-                rounded_rectangle=(self.x, self.y, self.width, self.height, dp(14)), width=1.2
+                rounded_rectangle=(self.x, self.y, self.width, self.height, T.R_CARD), width=dp(1)
             )
         self.bind(pos=self._update, size=self._update)
 
     def _update(self, *args):
         self.bg_rect.pos = self.pos
         self.bg_rect.size = self.size
-        self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, dp(14))
+        self.border_line.rounded_rectangle = (self.x, self.y, self.width, self.height, T.R_CARD)
 
 
 # ---------- 360-degree polar vector chart ----------
@@ -348,7 +355,7 @@ class PolarChart(Widget):
         self.original = None
         self.trial_run = None
         self.correction_angle = None
-        self.correction_color = (0.082, 0.502, 0.235)
+        self.correction_color = CORRECTION_COLOR
         self.bind(pos=self.redraw, size=self.redraw)
 
     def set_data(self, original, trial_run, correction_angle=None, correction_color=None):
@@ -363,21 +370,26 @@ class PolarChart(Widget):
         self.canvas.clear()
         if self.width <= 1 or self.height <= 1:
             return
-        cx = self.center_x
-        cy = self.center_y
+        # computed from x/width: the cached center_x can still hold the old
+        # value while this size callback runs
+        cx = self.x + self.width / 2.0
+        cy = self.y + self.height / 2.0
         radius = min(self.width, self.height) * 0.40
 
         with self.canvas:
-            # outer circle + cross hairs
-            Color(0.78, 0.83, 0.90, 1)
+            # dark plot well, outer circle + cross hairs
+            Color(*T.BG)
+            Ellipse(pos=(cx - radius, cy - radius), size=(radius * 2, radius * 2))
+            Color(*T.FIELD_LINE)
             Line(circle=(cx, cy, radius), width=1.1)
+            Color(*T.GRID)
             Line(circle=(cx, cy, radius * 0.66), width=0.8)
             Line(circle=(cx, cy, radius * 0.33), width=0.8)
             Line(points=[cx - radius, cy, cx + radius, cy], width=0.8)
             Line(points=[cx, cy - radius, cx, cy + radius], width=0.8)
 
             # 30-degree tick marks
-            Color(0.86, 0.89, 0.94, 1)
+            Color(*T.ICON)
             for deg in range(0, 360, 30):
                 rad = math.radians(deg)
                 x1 = cx + radius * 0.92 * math.sin(rad)
@@ -461,8 +473,9 @@ class RotorView(Widget):
         self.trial_label = Label(
             text="Trial",
             markup=True,
-            font_size=dp(12),
-            color=COLOR_TEXT_MUTED,
+            font_size=T.FS_CAPTION,
+            bold=True,
+            color=T.TEXT_2,
             size_hint=(None, None),
             size=(dp(46), dp(18)),
             opacity=0,
@@ -470,9 +483,9 @@ class RotorView(Widget):
         self.corr_label = Label(
             text="Correct",
             markup=True,
-            font_size=dp(12),
+            font_size=T.FS_CAPTION,
             bold=True,
-            color=COLOR_SUCCESS,
+            color=T.SERIES["green"],
             size_hint=(None, None),
             size=(dp(58), dp(18)),
             opacity=0,
@@ -494,22 +507,24 @@ class RotorView(Widget):
             self._anim.start(self)
 
     def _rebuild(self, *args):
-        self.canvas.clear()
+        # base art lives in canvas.before: clearing self.canvas would also
+        # remove the child Trial / Correct labels from the drawing
+        self.canvas.before.clear()
         if self.width <= 1 or self.height <= 1:
             return
-        cx, cy = self.center_x, self.center_y
+        cx, cy = self.x + self.width / 2.0, self.y + self.height / 2.0
         radius = min(self.width, self.height) * 0.36
 
-        with self.canvas:
-            Color(0.90, 0.93, 0.97, 1)
+        with self.canvas.before:
+            Color(*T.RAISED)
             Ellipse(pos=(cx - radius, cy - radius), size=(radius * 2, radius * 2))
-            Color(0.72, 0.78, 0.86, 1)
+            Color(*T.FIELD_LINE)
             Line(circle=(cx, cy, radius), width=1.4)
-            Color(0.55, 0.62, 0.72, 1)
+            Color(*T.ICON)
             Line(circle=(cx, cy, radius * 0.16), width=1.2)
 
             # reference mark at 0 degrees (12 o'clock)
-            Color(*COLOR_PRIMARY)
+            Color(*T.TEXT)
             Line(points=[cx, cy + radius * 0.82, cx, cy + radius * 1.02], width=2.4)
 
         self._update_markers()
@@ -517,7 +532,7 @@ class RotorView(Widget):
     def _update_markers(self, *args):
         if self.width <= 1 or self.height <= 1:
             return
-        cx, cy = self.center_x, self.center_y
+        cx, cy = self.x + self.width / 2.0, self.y + self.height / 2.0
         radius = min(self.width, self.height) * 0.36
 
         # Markers are redrawn into a fresh canvas layer each frame, so the
@@ -528,10 +543,13 @@ class RotorView(Widget):
                 rad = math.radians(self.trial_angle)
                 x = cx + radius * 0.78 * math.sin(rad)
                 y = cy + radius * 0.78 * math.cos(rad)
-                Color(0.62, 0.66, 0.74, 1)
+                Color(*T.SERIES["grey"])
                 Ellipse(pos=(x - dp(8), y - dp(8)), size=(dp(16), dp(16)))
                 self.trial_label.opacity = 1
-                self.trial_label.center = (x, y - dp(20))
+                # label sits inward from the marker, the correction label
+                # outward, so the two never cover each other
+                self.trial_label.center = (cx + radius * 0.48 * math.sin(rad),
+                                           cy + radius * 0.48 * math.cos(rad))
             else:
                 self.trial_label.opacity = 0
 
@@ -539,10 +557,11 @@ class RotorView(Widget):
                 rad = math.radians(self._anim_angle)
                 x = cx + radius * 0.78 * math.sin(rad)
                 y = cy + radius * 0.78 * math.cos(rad)
-                Color(*COLOR_SUCCESS)
+                Color(*CORRECTION_COLOR)
                 Ellipse(pos=(x - dp(10), y - dp(10)), size=(dp(20), dp(20)))
                 self.corr_label.opacity = 1
-                self.corr_label.center = (x, y - dp(22))
+                self.corr_label.center = (cx + (radius + dp(26)) * math.sin(rad),
+                                          cy + (radius + dp(16)) * math.cos(rad))
             else:
                 self.corr_label.opacity = 0
 
@@ -554,7 +573,7 @@ class LabeledInput(BoxLayout):
             text=label_text,
             size_hint_y=None,
             height=dp(24),
-            font_size=dp(14),
+            font_size=T.FS_BODY,
             color=COLOR_TEXT_MUTED,
             halign="left",
             bold=True,
@@ -563,11 +582,10 @@ class LabeledInput(BoxLayout):
         self.input = ModernInput(
             hint_text=hint_text,
             multiline=False,
-            height=dp(46),
+            height=T.TOUCH,
             font_size=dp(17),
-            panel_color=COLOR_BORDER,
-            text_color=COLOR_TEXT,
             accent=COLOR_PRIMARY,
+            mono=True,
         )
         self.add_widget(self.label)
         self.add_widget(self.input)
@@ -589,10 +607,10 @@ def section_label(text):
         text=f"[b][color={TEXT_HEX}]{text}[/color][/b]",
         markup=True,
         size_hint_y=None,
-        height=dp(26),
-        font_size=dp(15),
+        height=dp(36),
+        font_size=T.FS_TITLE,
         halign="left",
-        valign="middle",
+        valign="bottom",
     )
     lbl.bind(size=lambda inst, val: setattr(inst, "text_size", val))
     return lbl
@@ -621,20 +639,65 @@ def result_label():
         size_hint_y=None,
         halign="left",
         valign="top",
-        font_size=dp(16),
+        font_size=T.FS_TITLE,
         color=COLOR_TEXT,
+        line_height=1.1,
+        height=0,
     )
     lbl.bind(texture_size=lambda inst, val: setattr(inst, "height", val[1] + dp(10)))
     lbl.bind(width=lambda inst, val: setattr(inst, "text_size", (val, None)))
     return lbl
 
 
+def big_result(caption, value, tail="", color_hex=None):
+    """Markup for a key result: a small caption line, then the value large
+    in the mono reading font and the tool accent, then an optional tail."""
+    out = (f"[b][size={int(T.FS_BODY)}][color={T.TEXT_3_HEX}]{caption}[/color][/size][/b]\n"
+           f"[font={T.MONO}][size={int(T.FS_HEADER)}][color={color_hex or ACCENT_HEX}]"
+           f"{value}[/color][/size][/font]")
+    if tail:
+        out += f"[size={int(T.FS_BODY)}][color={T.TEXT_2_HEX}]  {tail}[/color][/size]"
+    return out
+
+
+class ResultCard(BoxLayout):
+    """The result card: a soft accent tint and accent hairline, so the answer
+    stands apart from the input cards. Collapses to nothing while empty."""
+
+    def __init__(self, label, **kwargs):
+        super().__init__(orientation="vertical", size_hint_y=None, height=0, **kwargs)
+        self.label = label
+        self.add_widget(label)
+        with self.canvas.before:
+            self._fill = Color(*T.soft(COLOR_PRIMARY, 0.10))
+            self._rect = RoundedRectangle(radius=[T.R_CARD])
+            self._bcol = Color(*T.soft(COLOR_PRIMARY, 0.45))
+            self._line = Line(width=dp(1))
+        self.bind(pos=self._redraw, size=self._redraw, minimum_height=self.setter("height"))
+        label.bind(text=self._sync)
+        self._sync()
+
+    def _sync(self, *a):
+        shown = bool(self.label.text.strip())
+        self.padding = [T.S4, T.S4, T.S4, T.S2] if shown else [0, 0, 0, 0]
+        self.label.opacity = 1 if shown else 0
+        self._fill.a = 0.10 if shown else 0
+        self._bcol.a = 0.45 if shown else 0
+        if not shown:
+            self.label.height = 0
+
+    def _redraw(self, *a):
+        self._rect.pos = self.pos
+        self._rect.size = self.size
+        self._line.rounded_rectangle = (self.x, self.y, self.width, self.height, T.R_CARD)
+
+
 def scroll_form():
     """Returns (scrollview, form_gridlayout) ready to receive widgets."""
     scroll = ScrollView()
     form = GridLayout(
-        cols=1, spacing=dp(14), size_hint_y=None,
-        padding=(dp(14), dp(14), dp(14), dp(24))
+        cols=1, spacing=T.S4, size_hint_y=None,
+        padding=(T.S4, T.S4, T.S4, T.S6)
     )
     form.bind(minimum_height=form.setter("height"))
     scroll.add_widget(form)
@@ -643,13 +706,13 @@ def scroll_form():
 
 def footer_label():
     lbl = Label(
-        text=f"[color={MUTED_HEX}]Built by Gnaneswar[/color]",
+        text=f"[color={T.TEXT_3_HEX}]Built by Gnaneswar[/color]",
         markup=True,
         size_hint_y=None,
         height=dp(40),
         halign="center",
         valign="middle",
-        font_size=dp(13),
+        font_size=T.FS_CAPTION,
     )
     lbl.bind(size=lambda inst, val: setattr(inst, "text_size", val))
     return lbl
@@ -711,10 +774,11 @@ class BalanceApp(App):
     def _build_tab_bar(self):
         """Two rows of pills: 3 on top, 2 below, so labels stay readable
         on a narrow phone screen."""
-        bar = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(104),
-                         padding=[dp(8), dp(6)], spacing=dp(6))
-        row1 = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
-        row2 = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+        bar = BoxLayout(orientation="vertical", size_hint_y=None,
+                         height=T.TOUCH * 2 + T.S2 * 3,
+                         padding=[T.S4, T.S2], spacing=T.S2)
+        row1 = BoxLayout(size_hint_y=None, height=T.TOUCH, spacing=T.S2)
+        row2 = BoxLayout(size_hint_y=None, height=T.TOUCH, spacing=T.S2)
 
         self.tab_buttons = {}
         specs_row1 = [("single", "Single Plane"), ("two", "Two Plane"), ("trial", "Trial Weight")]
@@ -722,8 +786,7 @@ class BalanceApp(App):
 
         for row, specs in ((row1, specs_row1), (row2, specs_row2)):
             for name, label in specs:
-                btn = PillButton(label, accent=COLOR_PRIMARY, inactive=COLOR_PANEL_BG,
-                                  text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+                btn = PillButton(label, accent=COLOR_PRIMARY)
                 btn.bind(on_release=lambda inst, n=name: self.switch_tab(n))
                 row.add_widget(btn)
                 self.tab_buttons[name] = btn
@@ -743,11 +806,9 @@ class BalanceApp(App):
     # ---------- phase convention (shared) ----------
     def _make_convention_block(self, parent):
         parent.add_widget(section_label("PHASE CONVENTION"))
-        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(8))
-        lag_btn = PillButton("Phase Lag", accent=COLOR_PRIMARY, inactive=COLOR_PANEL_BG,
-                              text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
-        lead_btn = PillButton("Phase Lead", accent=COLOR_PRIMARY, inactive=COLOR_PANEL_BG,
-                               text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=T.TOUCH, spacing=T.S2)
+        lag_btn = PillButton("Phase Lag", accent=COLOR_PRIMARY)
+        lead_btn = PillButton("Phase Lead", accent=COLOR_PRIMARY)
         lag_btn.bind(on_release=lambda inst: self.set_convention(False))
         lead_btn.bind(on_release=lambda inst: self.set_convention(True))
         row.add_widget(lag_btn)
@@ -782,11 +843,9 @@ class BalanceApp(App):
         self.<attr_name> (True = trial weight was removed)."""
         setattr(self, attr_name, True)
         parent.add_widget(section_label(title))
-        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(8))
-        rem_btn = PillButton("Removed", accent=COLOR_PRIMARY, inactive=COLOR_PANEL_BG,
-                              text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
-        keep_btn = PillButton("Left in place", accent=COLOR_PRIMARY, inactive=COLOR_PANEL_BG,
-                               text_color=(1, 1, 1, 1), inactive_text_color=COLOR_TEXT)
+        row = BoxLayout(orientation="horizontal", size_hint_y=None, height=T.TOUCH, spacing=T.S2)
+        rem_btn = PillButton("Removed", accent=COLOR_PRIMARY)
+        keep_btn = PillButton("Left in place", accent=COLOR_PRIMARY)
 
         def _set(removed):
             setattr(self, attr_name, removed)
@@ -835,13 +894,13 @@ class BalanceApp(App):
         for w in (self.o_amp, self.o_phase, self.t_wt, self.t_angle, self.tr_amp, self.tr_phase):
             panel.add_widget(w)
 
-        btn = RoundedButton(text="Compute Correction Weight", height=dp(50), accent=COLOR_PRIMARY)
+        btn = RoundedButton(text="Compute Correction Weight", height=T.BUTTON_H, accent=COLOR_PRIMARY)
         btn.bind(on_release=self.compute_single)
         panel.add_widget(btn)
         form.add_widget(panel)
 
         self.result_label = result_label()
-        form.add_widget(self.result_label)
+        form.add_widget(ResultCard(self.result_label))
 
         chart_panel = Panel(size_hint_y=None)
         chart_panel.bind(minimum_height=chart_panel.setter("height"))
@@ -917,20 +976,21 @@ class BalanceApp(App):
             warn = ""
 
         if self.single_trial_removed:
-            action = ("Remove the trial weight, then install the correction weight\n"
+            action = ("Remove the trial weight, then install the correction weight "
                       "at the stated angle (from the reference mark, against rotation).")
-            headline = f"CORRECTION WEIGHT: {wc_mag:.2f} @ {wc_ang:.1f}\u00b0"
+            headline = ("CORRECTION WEIGHT", f"{wc_mag:.2f} @ {wc_ang:.1f}\u00b0")
         else:
-            action = ("Leave the trial weight where it is and add the extra weight\n"
+            action = ("Leave the trial weight where it is and add the extra weight "
                       "shown above at the stated angle (from the reference mark, against rotation).")
-            headline = f"ADD: {add_mag:.2f} @ {add_ang:.1f}\u00b0"
+            headline = ("ADD", f"{add_mag:.2f} @ {add_ang:.1f}\u00b0")
 
         self.last_sensitivity = (s_mag, s_ang)
 
         self.result_label.text = (
-            f"[b][color={SUCCESS_HEX}]{headline} "
-            f"(~{clock_position(add_ang if not self.single_trial_removed else wc_ang)} o'clock)"
-            f"[/color][/b]\n\n"
+            big_result(headline[0], headline[1],
+                         f"(~{clock_position(add_ang if not self.single_trial_removed else wc_ang)}"
+                         " o'clock)")
+            + "\n\n"
             f"[color={MUTED_HEX}]Total weight needed in plane: {wc_mag:.2f} @ {wc_ang:.1f}\u00b0\n"
             f"Effect vector (E): {e_mag:.3f} @ {e_ang:.1f}\u00b0\n"
             f"Sensitivity (S = E/T): {s_mag:.4f} per unit mass @ {s_ang:.1f}\u00b0\n"
@@ -942,13 +1002,13 @@ class BalanceApp(App):
             original={"mag": o_amp, "angle": o_phase_i, "color": ORIGINAL_COLOR},
             trial_run={"mag": tr_amp, "angle": tr_phase_i, "color": RESULTANT_COLOR},
             correction_angle=wc_ang,
-            correction_color=COLOR_SUCCESS[:3],
+            correction_color=CORRECTION_COLOR,
         )
         self.chart_legend.text = "\n\n".join([
-            f"[color={ORIGINAL_HEX}]\u25CF  Original: {o_amp:.2f} @ {o_phase_i:.1f}\u00b0[/color]",
-            f"[color={RESULTANT_HEX}]\u25CF  Trial run (O+T): {tr_amp:.2f} @ {tr_phase_i:.1f}\u00b0[/color]",
-            f"[color={EFFECT_HEX}]\u25CF  Effect of trial weight: {e_mag:.2f} @ {e_ang:.1f}\u00b0[/color]",
-            f"[color={SUCCESS_HEX}]\u25CF  Correction weight: {wc_mag:.2f} @ {wc_ang:.1f}\u00b0[/color]",
+            f"[color={ORIGINAL_HEX}]{BULLET}  Original: {o_amp:.2f} @ {o_phase_i:.1f}\u00b0[/color]",
+            f"[color={RESULTANT_HEX}]{BULLET}  Trial run (O+T): {tr_amp:.2f} @ {tr_phase_i:.1f}\u00b0[/color]",
+            f"[color={EFFECT_HEX}]{BULLET}  Effect of trial weight: {e_mag:.2f} @ {e_ang:.1f}\u00b0[/color]",
+            f"[color={CORRECTION_HEX}]{BULLET}  Correction weight: {wc_mag:.2f} @ {wc_ang:.1f}\u00b0[/color]",
         ])
         self.rotor_view.set_weights(trial_angle=t_angle, correction_angle=wc_ang)
 
@@ -1005,13 +1065,13 @@ class BalanceApp(App):
                   self.tp_c1_ph, self.tp_c2_amp, self.tp_c2_ph):
             panel.add_widget(w)
 
-        btn = RoundedButton(text="Compute Both Planes", height=dp(50), accent=COLOR_PRIMARY)
+        btn = RoundedButton(text="Compute Both Planes", height=T.BUTTON_H, accent=COLOR_PRIMARY)
         btn.bind(on_release=self.compute_two_plane)
         panel.add_widget(btn)
         form.add_widget(panel)
 
         self.tp_result = result_label()
-        form.add_widget(self.tp_result)
+        form.add_widget(ResultCard(self.tp_result))
 
         # Chart for bearing 1 / plane 1
         cp1 = Panel(size_hint_y=None)
@@ -1115,25 +1175,25 @@ class BalanceApp(App):
         a22m, a22a = to_clock_deg(co["a22"])
 
         if self.two_trial_removed:
-            action = ("Remove trial weight 2, then install both correction weights\n"
+            action = ("Remove trial weight 2, then install both correction weights "
                       "together before the next run.")
-            l1 = f"PLANE 1: {w1m:.2f} @ {w1a:.1f}\u00b0"
-            l2 = f"PLANE 2: {w2m:.2f} @ {w2a:.1f}\u00b0"
+            l1 = big_result("PLANE 1", f"{w1m:.2f} @ {w1a:.1f}\u00b0")
+            l2 = big_result("PLANE 2", f"{w2m:.2f} @ {w2a:.1f}\u00b0")
         else:
-            action = ("Leave trial weight 2 where it is. Install the plane 1 weight\n"
+            action = ("Leave trial weight 2 where it is. Install the plane 1 weight "
                       "in full, and add only the extra shown for plane 2.")
-            l1 = f"PLANE 1 - INSTALL: {add1m:.2f} @ {add1a:.1f}\u00b0"
-            l2 = f"PLANE 2 - ADD: {add2m:.2f} @ {add2a:.1f}\u00b0"
+            l1 = big_result("PLANE 1 - INSTALL", f"{add1m:.2f} @ {add1a:.1f}\u00b0")
+            l2 = big_result("PLANE 2 - ADD", f"{add2m:.2f} @ {add2a:.1f}\u00b0")
 
         self.tp_result.text = (
-            f"[b][color={SUCCESS_HEX}]{l1}\n{l2}[/color][/b]\n\n"
+            f"{l1}\n\n{l2}\n\n"
             f"[color={MUTED_HEX}]Total needed \u2014 plane 1: {w1m:.2f} @ {w1a:.1f}\u00b0, "
             f"plane 2: {w2m:.2f} @ {w2a:.1f}\u00b0\n\n"
             f"Influence coefficients (per unit mass):\n"
-            f"  a11 plane1\u2192brg1: {a11m:.4f} @ {a11a:.1f}\u00b0\n"
-            f"  a21 plane1\u2192brg2: {a21m:.4f} @ {a21a:.1f}\u00b0\n"
-            f"  a12 plane2\u2192brg1: {a12m:.4f} @ {a12a:.1f}\u00b0\n"
-            f"  a22 plane2\u2192brg2: {a22m:.4f} @ {a22a:.1f}\u00b0\n\n"
+            f"  a11 plane1{ARROW}brg1: {a11m:.4f} @ {a11a:.1f}\u00b0\n"
+            f"  a21 plane1{ARROW}brg2: {a21m:.4f} @ {a21a:.1f}\u00b0\n"
+            f"  a12 plane2{ARROW}brg1: {a12m:.4f} @ {a12a:.1f}\u00b0\n"
+            f"  a22 plane2{ARROW}brg2: {a22m:.4f} @ {a22a:.1f}\u00b0\n\n"
             f"Predicted residual \u2014 brg 1: {r1m:.3f}, brg 2: {r2m:.3f}[/color]\n\n"
             f"[color={TEXT_HEX}]{action}[/color]"
         )
@@ -1142,24 +1202,24 @@ class BalanceApp(App):
             original={"mag": a1m, "angle": a1p_i, "color": ORIGINAL_COLOR},
             trial_run={"mag": b1m, "angle": b1p_i, "color": RESULTANT_COLOR},
             correction_angle=w1a,
-            correction_color=COLOR_SUCCESS[:3],
+            correction_color=CORRECTION_COLOR,
         )
         self.tp_legend1.text = "\n\n".join([
-            f"[color={ORIGINAL_HEX}]\u25CF  Brg 1 original: {a1m:.2f} @ {a1p_i:.1f}\u00b0[/color]",
-            f"[color={RESULTANT_HEX}]\u25CF  Brg 1 with trial wt 1: {b1m:.2f} @ {b1p_i:.1f}\u00b0[/color]",
-            f"[color={SUCCESS_HEX}]\u25CF  Plane 1 correction: {w1m:.2f} @ {w1a:.1f}\u00b0[/color]",
+            f"[color={ORIGINAL_HEX}]{BULLET}  Brg 1 original: {a1m:.2f} @ {a1p_i:.1f}\u00b0[/color]",
+            f"[color={RESULTANT_HEX}]{BULLET}  Brg 1 with trial wt 1: {b1m:.2f} @ {b1p_i:.1f}\u00b0[/color]",
+            f"[color={CORRECTION_HEX}]{BULLET}  Plane 1 correction: {w1m:.2f} @ {w1a:.1f}\u00b0[/color]",
         ])
 
         self.tp_chart2.set_data(
             original={"mag": a2m, "angle": a2p_i, "color": ORIGINAL_COLOR},
             trial_run={"mag": c2m, "angle": c2p_i, "color": RESULTANT_COLOR},
             correction_angle=w2a,
-            correction_color=COLOR_SUCCESS[:3],
+            correction_color=CORRECTION_COLOR,
         )
         self.tp_legend2.text = "\n\n".join([
-            f"[color={ORIGINAL_HEX}]\u25CF  Brg 2 original: {a2m:.2f} @ {a2p_i:.1f}\u00b0[/color]",
-            f"[color={RESULTANT_HEX}]\u25CF  Brg 2 with trial wt 2: {c2m:.2f} @ {c2p_i:.1f}\u00b0[/color]",
-            f"[color={SUCCESS_HEX}]\u25CF  Plane 2 correction: {w2m:.2f} @ {w2a:.1f}\u00b0[/color]",
+            f"[color={ORIGINAL_HEX}]{BULLET}  Brg 2 original: {a2m:.2f} @ {a2p_i:.1f}\u00b0[/color]",
+            f"[color={RESULTANT_HEX}]{BULLET}  Brg 2 with trial wt 2: {c2m:.2f} @ {c2p_i:.1f}\u00b0[/color]",
+            f"[color={CORRECTION_HEX}]{BULLET}  Plane 2 correction: {w2m:.2f} @ {w2a:.1f}\u00b0[/color]",
         ])
 
     # =====================================================
@@ -1189,13 +1249,13 @@ class BalanceApp(App):
             "large or high-speed rotors, the higher end on small or slow ones."
             "[/size][/color]", height=dp(46)))
 
-        btn = RoundedButton(text="Estimate Trial Weight", height=dp(50), accent=COLOR_PRIMARY)
+        btn = RoundedButton(text="Estimate Trial Weight", height=T.BUTTON_H, accent=COLOR_PRIMARY)
         btn.bind(on_release=self.compute_trial_weight)
         panel.add_widget(btn)
         form.add_widget(panel)
 
         self.tw_result = result_label()
-        form.add_widget(self.tw_result)
+        form.add_widget(ResultCard(self.tw_result))
         form.add_widget(footer_label())
         return scroll
 
@@ -1216,7 +1276,7 @@ class BalanceApp(App):
 
         omega = 2.0 * math.pi * rpm / 60.0
         self.tw_result.text = (
-            f"[b][color={SUCCESS_HEX}]SUGGESTED TRIAL WEIGHT: {mass_g:.1f} g[/color][/b]\n"
+            big_result("SUGGESTED TRIAL WEIGHT", f"{mass_g:.1f} g") + "\n"
             f"[color={TEXT_HEX}]at {radius:.0f} mm radius[/color]\n\n"
             f"[color={MUTED_HEX}]Target centrifugal force: {force_n:.0f} N "
             f"({pct:.0f}% of rotor weight)\n"
@@ -1250,13 +1310,9 @@ class BalanceApp(App):
         # Mode selector
         panel.add_widget(section_label("AVAILABLE POSITIONS"))
         mode_row = BoxLayout(orientation="horizontal", size_hint_y=None,
-                              height=dp(44), spacing=dp(8))
-        self.sp_mode_two = PillButton("Two angles", accent=COLOR_PRIMARY,
-                                       inactive=COLOR_PANEL_BG, text_color=(1, 1, 1, 1),
-                                       inactive_text_color=COLOR_TEXT)
-        self.sp_mode_even = PillButton("Equally spaced", accent=COLOR_PRIMARY,
-                                        inactive=COLOR_PANEL_BG, text_color=(1, 1, 1, 1),
-                                        inactive_text_color=COLOR_TEXT)
+                              height=T.TOUCH, spacing=T.S2)
+        self.sp_mode_two = PillButton("Two angles", accent=COLOR_PRIMARY)
+        self.sp_mode_even = PillButton("Equally spaced", accent=COLOR_PRIMARY)
         self.sp_mode_two.bind(on_release=lambda inst: self.set_split_mode("two"))
         self.sp_mode_even.bind(on_release=lambda inst: self.set_split_mode("even"))
         mode_row.add_widget(self.sp_mode_two)
@@ -1271,13 +1327,13 @@ class BalanceApp(App):
         for w in (self.sp_angle_a, self.sp_angle_b, self.sp_count, self.sp_offset):
             panel.add_widget(w)
 
-        btn = RoundedButton(text="Split the Weight", height=dp(50), accent=COLOR_PRIMARY)
+        btn = RoundedButton(text="Split the Weight", height=T.BUTTON_H, accent=COLOR_PRIMARY)
         btn.bind(on_release=self.compute_split)
         panel.add_widget(btn)
         form.add_widget(panel)
 
         self.sp_result = result_label()
-        form.add_widget(self.sp_result)
+        form.add_widget(ResultCard(self.sp_result))
         form.add_widget(footer_label())
 
         self.split_mode = "two"
@@ -1354,18 +1410,16 @@ class BalanceApp(App):
 
         def describe(name, w, a):
             if w >= 0:
-                return (f"[b][color={SUCCESS_HEX}]{name}: {w:.2f} @ {a % 360:.1f}\u00b0"
-                        f"[/color][/b]")
-            return (f"[b][color={WARNING_HEX}]{name}: {abs(w):.2f} @ "
-                    f"{(a + 180) % 360:.1f}\u00b0[/color][/b]"
-                    f"[color={MUTED_HEX}]  (negative \u2014 opposite side)[/color]")
+                return big_result(name, f"{w:.2f} @ {a % 360:.1f}\u00b0")
+            return big_result(name, f"{abs(w):.2f} @ {(a + 180) % 360:.1f}\u00b0",
+                              "(negative \u2014 opposite side)", color_hex=WARNING_HEX)
 
         # Verify the split really does reproduce the requested vector.
         check = (Wa * to_complex(1.0, ang_a)) + (Wb * to_complex(1.0, ang_b))
         chk_mag, chk_ang = to_clock_deg(check)
 
         self.sp_result.text = (
-            f"{describe('POSITION A', Wa, ang_a)}\n"
+            f"{describe('POSITION A', Wa, ang_a)}\n\n"
             f"{describe('POSITION B', Wb, ang_b)}\n\n"
             f"[color={MUTED_HEX}]Requested: {wt:.2f} @ {ang % 360:.1f}\u00b0\n"
             f"Check (A + B combined): {chk_mag:.2f} @ {chk_ang:.1f}\u00b0\n"
@@ -1404,17 +1458,17 @@ class BalanceApp(App):
         panel.add_widget(self.tm_s_ang)
 
         load_btn = RoundedButton(text="Load from Single Plane tab",
-                                  height=dp(46), accent=COLOR_PRIMARY_LIGHT)
+                                  height=T.TOUCH, accent=COLOR_PRIMARY_LIGHT, outline=True)
         load_btn.bind(on_release=self.load_sensitivity)
         panel.add_widget(load_btn)
 
-        btn = RoundedButton(text="Compute Trim Weight", height=dp(50), accent=COLOR_PRIMARY)
+        btn = RoundedButton(text="Compute Trim Weight", height=T.BUTTON_H, accent=COLOR_PRIMARY)
         btn.bind(on_release=self.compute_trim)
         panel.add_widget(btn)
         form.add_widget(panel)
 
         self.tm_result = result_label()
-        form.add_widget(self.tm_result)
+        form.add_widget(ResultCard(self.tm_result))
         form.add_widget(footer_label())
         return scroll
 
@@ -1453,8 +1507,8 @@ class BalanceApp(App):
         wc_mag, wc_ang = to_clock_deg(Wc)
 
         self.tm_result.text = (
-            f"[b][color={SUCCESS_HEX}]TRIM WEIGHT: {wc_mag:.2f} @ {wc_ang:.1f}\u00b0 "
-            f"(~{clock_position(wc_ang)} o'clock)[/color][/b]\n\n"
+            big_result("TRIM WEIGHT", f"{wc_mag:.2f} @ {wc_ang:.1f}\u00b0",
+                       f"(~{clock_position(wc_ang)} o'clock)") + "\n\n"
             f"[color={MUTED_HEX}]Residual vibration in: {amp:.2f} @ {phase_i:.1f}\u00b0\n"
             f"Sensitivity used: {s_mag:.4f} @ {s_ang:.1f}\u00b0[/color]\n\n"
             f"[color={TEXT_HEX}]Add this weight on top of what is already installed, then "

@@ -16,20 +16,25 @@ from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.screenmanager import ScreenManager, Screen, NoTransition
 from kivy.uix.scrollview import ScrollView
-from kivy.graphics import Color, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
+import theme as T
 from theme import ModernInput, build_pill_tab_bar, RoundedButton
 
 # ------------------------------------------------------------------
-# COLORS (teal-accented dark theme, consistent with the CM Toolkit palette)
+# COLORS - mapped onto the shared design tokens (theme.py)
 # ------------------------------------------------------------------
-BG = (0.043, 0.055, 0.078, 1)
-PANEL = (0.11, 0.13, 0.18, 1)
-TEXT = (0.92, 0.94, 0.97, 1)
-MUTED = (0.55, 0.60, 0.68, 1)
-ACCENT = (0.09, 0.68, 0.62, 1)
-GOOD = (0.16, 0.72, 0.38, 1)
-WARN = (0.95, 0.68, 0.15, 1)
-BAD = (0.86, 0.22, 0.22, 1)
+BG = T.BG
+PANEL = T.CARD
+BORDER = T.LINE
+TEXT = T.TEXT
+TEXT_2 = T.TEXT_2
+MUTED = T.TEXT_3
+ACCENT = T.ACCENTS["laser"]
+ACCENT_HEX = T.hex_of(ACCENT)
+# status text colours - always shown with the word (GOOD / ACCEPTABLE / ...)
+GOOD = T.GOOD_TEXT
+WARN = T.ALERT_TEXT
+BAD = T.DANGER_TEXT
 
 # General rule-of-thumb shaft alignment tolerances by RPM band.
 # These are widely-cited industry guideline figures, not a specific vendor
@@ -69,45 +74,46 @@ def _fit(label):
     return label
 
 
-def section_label(text, color=ACCENT, size=15):
+def section_label(text, color=TEXT, size=None):
     # grows to fit when the text wraps, so a long label never runs into
     # the field or line below it
-    lbl = _fit(Label(text=text, color=color, bold=True, font_size=sp(size),
+    lbl = _fit(Label(text=text, color=color, bold=True, font_size=size or T.FS_TITLE,
                       halign="left", valign="bottom", size_hint_y=None, height=dp(26)))
     lbl.bind(texture_size=lambda w, ts: setattr(w, "height", max(dp(22), ts[1] + dp(4))))
     return lbl
 
 
-def body_label(text, color=TEXT):
-    lbl = _fit(Label(text=text, color=color, font_size=sp(13.5), halign="left", valign="top",
-                      size_hint_y=None))
+def caption_label(text):
+    """Upper-case caption for result groups and table headers."""
+    return T.section_label(text)
+
+
+def body_label(text, color=TEXT, markup=False, bold=False, mono=False):
+    lbl = _fit(Label(text=text, color=color, font_size=T.FS_BODY, halign="left", valign="top",
+                      size_hint_y=None, markup=markup, bold=bold))
+    if mono:
+        lbl.font_name = T.MONO
     lbl.bind(texture_size=lambda w, ts: setattr(w, "height", ts[1] + dp(4)))
     return lbl
 
 
 def field(hint, default=""):
-    return ModernInput(hint_text=hint, text=default, multiline=False, height=dp(48),
-                        accent=ACCENT, font_size=sp(15))
+    return ModernInput(hint_text=hint, text=default, multiline=False,
+                        accent=ACCENT, mono=True)
 
 
 def labeled_field(label_text, hint, default=""):
     box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
     box.bind(minimum_height=box.setter("height"))
-    box.add_widget(section_label(label_text, MUTED, 13.5))
+    box.add_widget(section_label(label_text, TEXT_2, T.FS_BODY))
     ti = field(hint, default)
     box.add_widget(ti)
     return box, ti
 
 
 def panel(title):
-    """A rounded panel container with a title bar."""
-    outer = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(8),
-                       padding=[dp(12), dp(10)])
-    outer.bind(minimum_height=outer.setter("height"))
-    with outer.canvas.before:
-        Color(*PANEL)
-        rect = RoundedRectangle(radius=[dp(14)])
-    outer.bind(pos=lambda w, v: setattr(rect, "pos", v), size=lambda w, v: setattr(rect, "size", v))
+    """A rounded card container with a title."""
+    outer = T.Card(padding=[T.S4, T.S3, T.S4, T.S4], spacing=T.S2)
     outer.add_widget(section_label(title))
     return outer
 
@@ -126,7 +132,7 @@ class CalcScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(name="calc", **kwargs)
         root = ScrollView()
-        col = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12), size_hint_y=None)
+        col = BoxLayout(orientation="vertical", spacing=T.S3, padding=[T.S4, T.S3, T.S4, T.S4], size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
 
         col.add_widget(body_label(
@@ -135,7 +141,7 @@ class CalcScreen(Screen):
             "same naming Easy-Laser uses). Corrections are extrapolated out to each foot.", MUTED))
 
         setup = panel("Machine setup")
-        grid = GridLayout(cols=2, spacing=dp(8), size_hint_y=None)
+        grid = GridLayout(cols=2, spacing=[T.S3, T.S2], size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         b1, self.rpm_in = labeled_field("RPM", "e.g. 1485", "1485")
         b2, self.s2s_in = labeled_field("Sensor to sensor (mm)", "e.g. 200", "200")
@@ -154,7 +160,7 @@ class CalcScreen(Screen):
 
         vert = panel("Vertical plane (side view)")
         vert.add_widget(body_label("Offset sign: + = remove shim, - = add shim", MUTED))
-        vgrid = GridLayout(cols=2, spacing=dp(8), size_hint_y=None)
+        vgrid = GridLayout(cols=2, spacing=[T.S3, T.S2], size_hint_y=None)
         vgrid.bind(minimum_height=vgrid.setter("height"))
         bv1, self.v_off_in = labeled_field("Offset at coupling (mm)", "e.g. 0.08")
         bv2, self.v_ang_in = labeled_field("Angularity (mm/100 mm)", "e.g. 0.02")
@@ -164,7 +170,7 @@ class CalcScreen(Screen):
 
         horiz = panel("Horizontal plane (top view)")
         horiz.add_widget(body_label("Offset sign: + = move left, - = move right", MUTED))
-        hgrid = GridLayout(cols=2, spacing=dp(8), size_hint_y=None)
+        hgrid = GridLayout(cols=2, spacing=[T.S3, T.S2], size_hint_y=None)
         hgrid.bind(minimum_height=hgrid.setter("height"))
         bh1, self.h_off_in = labeled_field("Offset at coupling (mm)", "e.g. 0.10")
         bh2, self.h_ang_in = labeled_field("Angularity (mm/100 mm)", "e.g. 0.04")
@@ -177,7 +183,7 @@ class CalcScreen(Screen):
         col.add_widget(calc_btn)
 
         self.result_panel = panel("Results")
-        self.result_body = BoxLayout(orientation="vertical", spacing=dp(6), size_hint_y=None)
+        self.result_body = BoxLayout(orientation="vertical", spacing=T.S1, size_hint_y=None)
         self.result_body.bind(minimum_height=self.result_body.setter("height"))
         self.result_panel.add_widget(self.result_body)
         col.add_widget(self.result_panel)
@@ -214,22 +220,25 @@ class CalcScreen(Screen):
         def dir_v(val):
             return "Remove shim" if val >= 0 else "Add shim"
 
+        def move(foot, direction, val):
+            return body_label("%s: %s [color=%s][b]%.2f mm[/b][/color]" % (
+                foot, direction, ACCENT_HEX, abs(val)), TEXT, markup=True)
+
+        def status(text, color):
+            return body_label("[b]%s[/b]" % text, color, markup=True)
+
         h_label, h_color = classify(h_off, h_ang, rpm)
         v_label, v_color = classify(v_off, v_ang, rpm)
 
         self.result_body.clear_widgets()
-        self.result_body.add_widget(section_label("Vertical (shims)", ACCENT))
-        self.result_body.add_widget(body_label(
-            "MF1 (near foot): %s %.2f mm" % (dir_v(v_ff), abs(v_ff))))
-        self.result_body.add_widget(body_label(
-            "MF2 (far foot): %s %.2f mm" % (dir_v(v_bf), abs(v_bf))))
-        self.result_body.add_widget(body_label("Vertical condition: %s" % v_label, v_color))
-        self.result_body.add_widget(section_label("Horizontal (sideways)", ACCENT))
-        self.result_body.add_widget(body_label(
-            "MF1 (near foot): %s %.2f mm" % (dir_h(h_ff), abs(h_ff))))
-        self.result_body.add_widget(body_label(
-            "MF2 (far foot): %s %.2f mm" % (dir_h(h_bf), abs(h_bf))))
-        self.result_body.add_widget(body_label("Horizontal condition: %s" % h_label, h_color))
+        self.result_body.add_widget(caption_label("Vertical (shims)"))
+        self.result_body.add_widget(move("MF1 (near foot)", dir_v(v_ff), v_ff))
+        self.result_body.add_widget(move("MF2 (far foot)", dir_v(v_bf), v_bf))
+        self.result_body.add_widget(status("Vertical condition: %s" % v_label, v_color))
+        self.result_body.add_widget(caption_label("Horizontal (sideways)"))
+        self.result_body.add_widget(move("MF1 (near foot)", dir_h(h_ff), h_ff))
+        self.result_body.add_widget(move("MF2 (far foot)", dir_h(h_bf), h_bf))
+        self.result_body.add_widget(status("Horizontal condition: %s" % h_label, h_color))
         self.result_body.add_widget(body_label(
             "Guideline only - verify against coupling/OEM tolerance for critical machines. "
             "Correct vertical (shims) first, then horizontal. Shim direction and the sensor-"
@@ -244,7 +253,7 @@ class SoftFootScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(name="softfoot", **kwargs)
         root = ScrollView()
-        col = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12), size_hint_y=None)
+        col = BoxLayout(orientation="vertical", spacing=T.S3, padding=[T.S4, T.S3, T.S4, T.S4], size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
 
         col.add_widget(body_label(
@@ -253,7 +262,7 @@ class SoftFootScreen(Screen):
             "that corner." % SOFT_FOOT_THRESHOLD_MM, MUTED))
 
         p = panel("Foot readings (mm)")
-        grid = GridLayout(cols=2, spacing=dp(8), size_hint_y=None)
+        grid = GridLayout(cols=2, spacing=[T.S3, T.S2], size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         self.foot_inputs = {}
         for name in ("Front-Left", "Front-Right", "Back-Left", "Back-Right"):
@@ -268,7 +277,7 @@ class SoftFootScreen(Screen):
         col.add_widget(check_btn)
 
         self.result_panel = panel("Results")
-        self.result_body = BoxLayout(orientation="vertical", spacing=dp(6), size_hint_y=None)
+        self.result_body = BoxLayout(orientation="vertical", spacing=T.S1, size_hint_y=None)
         self.result_body.bind(minimum_height=self.result_body.setter("height"))
         self.result_panel.add_widget(self.result_body)
         col.add_widget(self.result_panel)
@@ -286,11 +295,11 @@ class SoftFootScreen(Screen):
                 any_soft = True
                 shim = val            # shim the full measured gap (parallel soft foot)
                 self.result_body.add_widget(body_label(
-                    "%s: %.2f mm - SOFT FOOT (shim ~%.2f mm)" % (name, val, shim), BAD))
+                    "%s: %.2f mm - [b]SOFT FOOT[/b] (shim ~%.2f mm)" % (name, val, shim), BAD, markup=True))
             else:
-                self.result_body.add_widget(body_label("%s: %.2f mm - OK" % (name, val), GOOD))
+                self.result_body.add_widget(body_label("%s: %.2f mm - [b]OK[/b]" % (name, val), GOOD, markup=True))
         if not any_soft:
-            self.result_body.add_widget(body_label("No soft foot detected at any corner.", GOOD))
+            self.result_body.add_widget(body_label("[b]No soft foot detected at any corner.[/b]", GOOD, markup=True))
         else:
             self.result_body.add_widget(body_label(
                 "Correct soft foot before proceeding with coupling alignment - it will "
@@ -306,7 +315,7 @@ class GuideScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(name="guide", **kwargs)
         root = ScrollView()
-        col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(12), size_hint_y=None)
+        col = BoxLayout(orientation="vertical", spacing=T.S2, padding=[T.S4, T.S3, T.S4, T.S4], size_hint_y=None)
         col.bind(minimum_height=col.setter("height"))
 
         col.add_widget(section_label("General alignment tolerance guideline"))
@@ -314,21 +323,29 @@ class GuideScreen(Screen):
             "Widely-cited rule-of-thumb figures by shaft speed. Always prefer OEM or "
             "coupling manufacturer tolerances for critical or high-speed machines.", MUTED))
 
-        header = GridLayout(cols=5, size_hint_y=None, height=dp(40), spacing=dp(4))
+        table = T.Card(padding=[T.S2, T.S2], spacing=0)
+        header = GridLayout(cols=5, size_hint_y=None, height=dp(44), spacing=dp(4))
         for h in ("RPM up to", "Good\noffset", "Good\nang/100mm", "OK\noffset", "OK\nang/100mm"):
-            header.add_widget(_fit(Label(text=h, bold=True, font_size=sp(11), color=ACCENT,
+            header.add_widget(_fit(Label(text=h, bold=True, font_size=T.FS_CAPTION, color=MUTED,
                                           halign="center", valign="middle")))
-        col.add_widget(header)
+        table.add_widget(header)
 
-        for max_rpm, go, ga, oo, oa in TOLERANCE_BANDS:
-            row = GridLayout(cols=5, size_hint_y=None, height=dp(30), spacing=dp(4))
+        for i, (max_rpm, go, ga, oo, oa) in enumerate(TOLERANCE_BANDS):
+            row = GridLayout(cols=5, size_hint_y=None, height=dp(36), spacing=dp(4))
+            with row.canvas.before:
+                Color(*BORDER)
+                ln = Line(width=1)
+            row.bind(pos=lambda w, v, ln=ln: setattr(ln, "points", [w.x, w.top, w.right, w.top]),
+                     size=lambda w, v, ln=ln: setattr(ln, "points", [w.x, w.top, w.right, w.top]))
             rpm_txt = "%d" % max_rpm if max_rpm < 999999 else "6000+"
-            for val in (rpm_txt, "%.3f" % go, "%.3f" % ga, "%.3f" % oo, "%.3f" % oa):
-                row.add_widget(_fit(Label(text=val, font_size=sp(11), color=TEXT,
+            for j, val in enumerate((rpm_txt, "%.3f" % go, "%.3f" % ga, "%.3f" % oo, "%.3f" % oa)):
+                row.add_widget(_fit(Label(text=val, font_size=T.FS_CAPTION, font_name=T.MONO,
+                                           color=TEXT if j else TEXT_2, bold=(j == 0),
                                            halign="center", valign="middle")))
-            col.add_widget(row)
+            table.add_widget(row)
+        col.add_widget(table)
 
-        col.add_widget(section_label("Offset vs. angularity", ACCENT))
+        col.add_widget(section_label("Offset vs. angularity"))
         col.add_widget(body_label(
             "Offset (parallel) misalignment: shaft centerlines are parallel but not "
             "coincident. Angularity misalignment: shaft centerlines meet at an angle "
@@ -339,7 +356,7 @@ class GuideScreen(Screen):
             "shim; horizontal results are given as Move Left/Right. Correct vertical first, "
             "then horizontal - shimming can shift the horizontal reading slightly."))
 
-        col.add_widget(section_label("Soft foot", ACCENT))
+        col.add_widget(section_label("Soft foot"))
         col.add_widget(body_label(
             "Soft foot is a mechanical condition where one or more feet don't sit flush "
             "on the baseplate, so tightening that bolt distorts the machine frame and "
@@ -373,7 +390,7 @@ class RootWidget(BoxLayout):
         self.add_widget(nav)
         self.add_widget(self.sm)
 
-        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=sp(11),
+        footer = Label(text="Built by Gnaneswar", color=MUTED, font_size=T.FS_CAPTION,
                         size_hint_y=None, height=dp(26))
         self.add_widget(footer)
 
